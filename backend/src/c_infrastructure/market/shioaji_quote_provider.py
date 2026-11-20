@@ -12,6 +12,7 @@ from shioaji import Shioaji
 from shioaji.constant import OrderState
 from shioaji.contracts import Index
 from shioaji.data import Snapshot
+from shioaji.error import TokenError
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -21,7 +22,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketIndex
 from a_domain.types.errors import BrokerNotAnswering
 from b_application.config.market_data_config import IndexQuoteContract, MarketDataConfig
-from b_application.config.trading_config import ShioajiLogin
+from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
 from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
@@ -30,18 +31,61 @@ from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 class ShioajiConnection:
     """
     The process's link to Shioaji on one login, which the quote provider of every runtime on that login shares. `client`
-    is the client of the latest login and `login` that login in its thread. `up` says the login succeeded and Shioaji has
-    not reported its session down since: Solace calls the session-down callback from its own thread once its reconnects
-    gave up. `pace` paces every market-data request on the login, whichever runtime makes it, since Shioaji counts its
-    50 market-data queries per 10 seconds per login. `earlier_clients` keeps every client a login was made on before
-    `client` for the life of the process, none logged out or collected.
+    is the client of the latest login that succeeded, else of the first, and `login` the latest login in its thread. `up`
+    says the login of `client` succeeded and Shioaji has not reported it down since: Solace calls the session-down
+    callback from its own thread once its reconnects gave up, and a request whose token Shioaji refused marks it down
+    (sdk_request), since the SDK then disconnects the session itself and calls no callback. `logged_in_at` is when that
+    login succeeded, by the market clock, None before one did; `failed_at` when the latest login failed. `pace` paces
+    every market-data request on the login, whichever runtime makes it, since Shioaji counts its 50 market-data queries
+    per 10 seconds per login. `earlier_clients` keeps every other client a login was made on for the life of the
+    process, none logged out or collected.
     """
 
     client: Shioaji
     up: bool = False
     login: asyncio.Future[None] | None = None
+    logged_in_at: datetime | None = None
+    failed_at: datetime | None = None
     pace: RequestPace = field(default_factory=RequestPace)
     earlier_clients: list[Shioaji] = field(default_factory=list)
+
+    def lost(self, client: Shioaji) -> None:
+        """The login of `client` is down, while `client` is still the connection's: a later login's client stays up."""
+        if self.client is client:
+            self.up = False
+
+    def due(self, market_clock: IMarketClock, shioaji: ShioajiConfig, opened_on: datetime | None) -> bool:
+        """
+        Whether a login is to be made again now: the login of `client` failed, went down, or is stale, made before the
+        latest market day's shioaji.login_renewal_time, so that Shioaji's token, whose lifetime SinoPac does not state,
+        is renewed every market day before the session; and no login failed within shioaji.login_retry_seconds, so a
+        SinoPac that does not answer is not asked again at once. A connection whose login time is not known is not stale.
+        Also due, to be taken up rather than made, while the login of `client` is up and is not the one the asker
+        opened on (`opened_on`, when that one succeeded): a runtime that stopped waiting for a login left it running,
+        and it succeeded since. connect asks on the latest login, `logged_in_at`.
+        """
+        now = market_clock.now()
+
+        if self.failed_at is not None and now < self.failed_at + timedelta(seconds=shioaji.login_retry_seconds):
+            return False
+
+        if self.up and self.logged_in_at != opened_on:
+            return True
+
+        renewal = market_clock.last_market_time(shioaji.login_renewal_time)
+        return not self.up or (self.logged_in_at is not None and self.logged_in_at < renewal)
+
+
+@dataclass(frozen=True, slots=True)
+class ShioajiSession:
+    """
+    One client of a connection, as a request is made on it (sdk_request): a runtime's broker keeps the client of the
+    login it was opened on, and the quote provider asks the connection's latest. A refused token marks that client's
+    login down, and only while it is still the connection's (ShioajiConnection.lost).
+    """
+
+    connection: ShioajiConnection
+    client: Shioaji
 
 
 class ShioajiQuoteProvider(IBrokerQuoteProvider):
@@ -68,6 +112,7 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
         connection: ShioajiConnection,
         new_client: Callable[[], Shioaji],
         login: ShioajiLogin,
+        shioaji: ShioajiConfig,
         market_clock: IMarketClock,
         market_data: MarketDataConfig,
         board_lot_shares: int,
@@ -76,6 +121,7 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
         self._connection = connection
         self._new_client = new_client
         self._login = login
+        self._shioaji = shioaji
         self._clock = market_clock
         self._epoch = datetime(1970, 1, 1, tzinfo=TAIWAN_TIMEZONE)
         self._batch_size = market_data.quote_batch_size
@@ -90,34 +136,28 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
     async def connect(self) -> None:
         """
         Logs in without subscribing to the account's order events (the broker polls its orders itself; its own orders'
-        events go to log_order_event), unless the login is up, and waits for it. A login that failed or went down is made
-        again on a new client, and the one before is kept, never logged out. The wait is shielded: a reload that times out
-        or is cancelled leaves the login running, and the next runtime waits for the same login instead of making another.
+        events go to log_order_event), unless the login is up and not stale (ShioajiConnection.due), and waits for it. A
+        login that failed, went down or is stale is made again on a new client, which becomes the connection's once the
+        login succeeded; the one before is kept, never logged out, and a stale one serves until then. Within
+        shioaji.login_retry_seconds of a failed login it raises at once and makes none. The wait is shielded: a reload
+        that times out or is cancelled leaves the login running, and the next runtime waits for the same login instead
+        of making another.
         """
         connection = self._connection
 
-        if connection.up:
-            return
-
         if connection.login is None or connection.login.done():
-            if connection.login is not None:
-                connection.earlier_clients.append(connection.client)
-                connection.client = self._new_client()
+            if not connection.due(self._clock, self._shioaji, connection.logged_in_at):
+                if connection.up:
+                    return
 
-            client, login = connection.client, self._login
+                raise RuntimeError(f"a login failed within shioaji.login_retry_seconds ({self._shioaji.login_retry_seconds:g})")
 
-            def gone_down() -> None:
-                if connection.client is client:
-                    connection.up = False
-
-            def log_in() -> None:
-                api_key, secret_key = login.api_key.get_secret_value(), login.secret_key.get_secret_value()
-                client.login(api_key=api_key, secret_key=secret_key, subscribe_trade=False)
-                client.set_session_down_callback(gone_down)
-                client.set_order_callback(partial(log_order_event, self._logger))
-                connection.up = True
-
-            connection.login = asyncio.get_running_loop().run_in_executor(None, log_in)
+            client, events = (
+                connection.client if connection.login is None else self._new_client(),
+                partial(log_order_event, self._logger),
+            )
+            login = partial(log_in, connection, client, self._login, self._clock, events)
+            connection.login = asyncio.get_running_loop().run_in_executor(None, login)
 
         try:
             await asyncio.shield(connection.login)
@@ -136,9 +176,9 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
         quotes: dict[str, Ohlcv] = {}
 
         for offset in range(0, len(contracts), self._batch_size):
-            batch, client = contracts[offset : offset + self._batch_size], self._connection.client
+            batch, session = contracts[offset : offset + self._batch_size], ShioajiSession(self._connection, self._connection.client)
             await self._connection.pace.wait(self._quote_interval_seconds)
-            snapshots: list[Snapshot] = await sdk_request(client.snapshots, batch, timeout=self._timeout_milliseconds)
+            snapshots: list[Snapshot] = await sdk_request(session, session.client.snapshots, batch, timeout=self._timeout_milliseconds)
             quotes |= {
                 snapshot.code: quote
                 for snapshot in snapshots
@@ -166,8 +206,9 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
             return {}
 
         await self._connection.pace.wait(self._quote_interval_seconds)
+        session = ShioajiSession(self._connection, self._connection.client)
         snapshots: list[Snapshot] = await sdk_request(
-            self._connection.client.snapshots, list(contracts.values()), timeout=self._timeout_milliseconds
+            session, session.client.snapshots, list(contracts.values()), timeout=self._timeout_milliseconds
         )
         index_of = {contract.code: index for index, contract in contracts.items()}
         return {
@@ -175,6 +216,38 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
             for snapshot in snapshots
             if snapshot.code in index_of and (quote := index_quote_of(snapshot, self._epoch)) is not None
         }
+
+
+def log_in(
+    connection: ShioajiConnection,
+    client: Shioaji,
+    login: ShioajiLogin,
+    market_clock: IMarketClock,
+    order_events: Callable[[OrderState, Mapping[str, object]], None],
+) -> None:
+    """
+    One login of `connection` on `client`, in a worker thread: once it succeeded, `client` is the connection's and up,
+    with its session-down callback and its order events registered, and the client before it is kept. A login that
+    fails leaves the connection's client as it was, up or not, keeps `client` and says when it failed.
+    """
+    api_key, secret_key = login.api_key.get_secret_value(), login.secret_key.get_secret_value()
+
+    try:
+        client.login(api_key=api_key, secret_key=secret_key, subscribe_trade=False)
+        client.set_session_down_callback(partial(connection.lost, client))
+        client.set_order_callback(order_events)
+    except Exception:
+        connection.failed_at = market_clock.now()
+
+        if client is not connection.client:
+            connection.earlier_clients.append(client)
+
+        raise
+
+    if client is not connection.client:
+        connection.earlier_clients.append(connection.client)
+
+    connection.client, connection.up, connection.logged_in_at, connection.failed_at = client, True, market_clock.now(), None
 
 
 def index_contracts_of(client: Shioaji, named: Mapping[MarketIndex, IndexQuoteContract]) -> dict[MarketIndex, Index]:
@@ -232,15 +305,20 @@ def quote_of(snapshot: Snapshot, epoch: datetime, board_lot_shares: int) -> Ohlc
 
 
 async def sdk_request[**Arguments, Answer](
-    call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
+    session: ShioajiSession, call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
 ) -> Answer:
     """
-    Makes one request of the SDK, `call` with its arguments in a worker thread. Its failure raises BrokerNotAnswering
-    saying what failure_of says of the SDK's error, never the error's text.
+    Makes one request of the SDK on `session`'s client, `call` with its arguments in a worker thread. Its failure raises
+    BrokerNotAnswering saying what failure_of says of the SDK's error, never the error's text. A refused token
+    (TokenError, the server's 401) marks the session's login down (ShioajiConnection.lost): the SDK has disconnected the
+    session then, so every later request on the client fails, and the next runtime logs in again.
     """
     try:
         return await asyncio.to_thread(call, *args, **kwargs)
     except Exception as error:
+        if isinstance(error, TokenError):
+            session.connection.lost(session.client)
+
         raise BrokerNotAnswering(f"Shioaji answered {failure_of(error)}") from None
 
 

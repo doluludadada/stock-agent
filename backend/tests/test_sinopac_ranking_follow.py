@@ -8,7 +8,7 @@ no account, never on the mock account in its place.
 """
 
 from dataclasses import replace
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -22,9 +22,11 @@ from test_ranking_follow import CLOSES, FORMULA, affordable, site
 from trading_stack import SilentLogger, bar, run_stats
 
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.follow import FollowAccount
 from a_domain.rules.trading.order_rule import BrokerLink, SimulationOnlyRule, SiteOrdering
@@ -79,6 +81,7 @@ def order_of(action: TradeAction = TradeAction.BUY) -> Order:
         time_in_force=TimeInForce.IOC,
         quantity=100,
         limit_price=100.0,
+        price_at_signal=100.0,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -119,7 +122,7 @@ async def test_no_setting_lets_a_ranking_follows_order_reach_a_production_login(
     rule, on_disk = harness_config().broker_access_rule(), replace(EVERYONE, server=server)
 
     def refusal(workflow: Workflow, link: BrokerLink) -> RejectReason | None:
-        return reason_of(rule.apply(order_of(), workflow, ExecutionProvider.SHIOAJI, link, ADMIN, on_disk, []))
+        return reason_of(rule.apply(order_of(), workflow, ExecutionProvider.SHIOAJI, link, ADMIN, on_disk, [], 1_000_000))
 
     on_production = not server.simulation
     assert refusal(Workflow.RANKING_FOLLOW, PRODUCTION) == RejectReason.NOT_SIMULATION
@@ -191,10 +194,11 @@ def test_on_a_real_broker_each_buy_is_sized_inside_the_order_limit_and_on_the_mo
     account = Account(cash=1_000_000.0)
 
     def sized(broker: ExecutionProvider) -> dict[str, int]:
-        return {buy.stock_id: buy.quantity for buy in rule.apply(ranking, account, stocks, NOW, broker) if not isinstance(buy, str)}
+        decided = rule.apply(ranking, account, stocks, NOW, broker, [], None, [])
+        return {buy.stock_id: buy.quantity for buy in decided if not isinstance(buy, str)}
 
-    limit = config.trading.max_order_value
-    assert limit < 500_000
+    limit = config.trading.max_order_equity_pct * account.equity
+    assert limit == 250_000
     assert sized(ExecutionProvider.MOCK) == {"2330": affordable(500_000, 100), "2317": affordable(500_000, 50)}
     assert sized(ExecutionProvider.SHIOAJI) == {"2330": affordable(limit, 100), "2317": affordable(limit, 50)}
     assert all(quantity * CLOSES[stock_id] <= limit for stock_id, quantity in sized(ExecutionProvider.SHIOAJI).items())
@@ -218,7 +222,7 @@ def test_on_sinopac_a_follows_buys_cost_no_more_than_the_cash_it_has_now_and_the
     cost_rule = rule.affordable_quantity_rule.cost_rule
 
     def decided(broker: ExecutionProvider) -> tuple[list[TradeSignal], list[str]]:
-        answers = rule.apply(ranking, account, stocks, NOW, broker)
+        answers = rule.apply(ranking, account, stocks, NOW, broker, [], None, [])
         return [answer for answer in answers if not isinstance(answer, str)], [answer for answer in answers if isinstance(answer, str)]
 
     def cost_of(buys: list[TradeSignal]) -> float:
@@ -232,7 +236,8 @@ def test_on_sinopac_a_follows_buys_cost_no_more_than_the_cash_it_has_now_and_the
     assert [(sell.stock_id, sell.quantity) for sell in on_sinopac if sell.action == TradeAction.SELL] == [(left, 10_000)]
     assert [buy.stock_id for buy in buys_on_mock] == ["2330", "2317"] and not unfollowed_on_mock
     assert cost_of(buys_on_mock) > cash
-    assert [(buy.stock_id, buy.quantity) for buy in buys_on_sinopac] == [("2330", affordable(config.trading.max_order_value, 100))]
+    order_limit = config.trading.max_order_equity_pct * (cash + 10_000 * CLOSES[left])
+    assert [(buy.stock_id, buy.quantity) for buy in buys_on_sinopac] == [("2330", affordable(order_limit, 100))]
     assert cost_of(buys_on_sinopac) <= cash
     assert len(waiting) == 1 and waiting[0].startswith("2317: a BUY of ") and "a sale's proceeds count once they settle" in waiting[0]
     assert [ExecutionProvider.MOCK.credits_sales_at_once, ExecutionProvider.SHIOAJI.credits_sales_at_once] == [True, False]
@@ -252,8 +257,8 @@ def test_on_sinopac_a_follow_between_a_sale_and_its_settlement_makes_no_buy_smal
     )
     account = Account(cash=20_000.0, positions=[Position(stock_id="2330", quantity=1000, average_cost=100.0)])
 
-    on_sinopac = rule.apply(ranking, account, stocks, NOW, ExecutionProvider.SHIOAJI)
-    on_mock = rule.apply(ranking, account, stocks, NOW, ExecutionProvider.MOCK)
+    on_sinopac = rule.apply(ranking, account, stocks, NOW, ExecutionProvider.SHIOAJI, [], None, [])
+    on_mock = rule.apply(ranking, account, stocks, NOW, ExecutionProvider.MOCK, [], None, [])
 
     assert [answer.split(":")[0] for answer in on_sinopac if isinstance(answer, str)] == ["2317", "1101"]
     assert not [answer for answer in on_sinopac if not isinstance(answer, str)]
@@ -261,6 +266,191 @@ def test_on_sinopac_a_follow_between_a_sale_and_its_settlement_makes_no_buy_smal
         ("2317", affordable(10_000, 50)),
         ("1101", affordable(10_000, 30)),
     ]
+
+
+def ranked(*stock_ids: str) -> Ranking:
+    """The ranking of `stock_ids`, best first."""
+    stocks = [
+        RankedStock(stock_id=stock_id, factors=[RankedFactor(value=1, rank=1), RankedFactor(value=1, rank=1)], score=2)
+        for stock_id in stock_ids
+    ]
+    return Ranking(formula=FORMULA, decided_on=date(2026, 10, 13), revenue_month=date(2026, 9, 1), universe=3, scored=3, stocks=stocks)
+
+
+def bought_on_sinopac_today(value: float) -> list[Order]:
+    """One BUY of the day on SinoPac that filled `value` at its limit of 100."""
+    earlier = replace(order_of(), quantity=int(value // 100), stock_id="2603", status=OrderStatus.FILLED)
+    return [replace(earlier, filled_quantity=earlier.quantity)]
+
+
+def follow_of(
+    cash: float, broker: ExecutionProvider, earlier: list[Order], trading_available: float | None
+) -> tuple[list[str], list[str]]:
+    """What a follow of 2330, 2317 and 1101 into an account of `cash` alone buys, and the sentences of what waits."""
+    stocks = {stock_id: Stock(stock_id=stock_id, realtime_bar=bar(NOW, price)) for stock_id, price in CLOSES.items()}
+    answers = (
+        harness_config()
+        .ranking_follow_rule()
+        .apply(ranked("2330", "2317", "1101"), Account(cash=cash), stocks, NOW, broker, earlier, trading_available, [])
+    )
+    return [answer.stock_id for answer in answers if isinstance(answer, TradeSignal)], [a for a in answers if isinstance(a, str)]
+
+
+@pytest.mark.parametrize(
+    ("cash", "bought", "kept"),
+    [(1_000_000, 0, ["2330", "2317", "1101"]), (1_000_000, 800_000, ["2330"]), (3_000_000, 800_000, ["2330", "2317", "1101"])],
+    ids=["no-earlier-buy", "most-of-the-limit-spent", "a-grown-account"],
+)
+def test_on_sinopac_a_follow_keeps_its_best_stocks_inside_the_days_buy_limit_and_leaves_the_rest_open(
+    cash: float, bought: float, kept: list[str]
+) -> None:
+    """
+    Each BUY takes 25% of the equity: 250,000 of 1,000,000. After 800,000 of BUYs today 110% of it leaves 300,000, which
+    pays for 2330 alone; an account of 3,000,000 has 2,500,000 left for three of 750,000.
+    """
+    buys, waiting = follow_of(cash, ExecutionProvider.SHIOAJI, bought_on_sinopac_today(bought) if bought else [], None)
+
+    assert buys == kept
+    assert [line.split(":")[0] for line in waiting] == [stock_id for stock_id in ("2330", "2317", "1101") if stock_id not in kept]
+    assert all("and the day's BUY limit (trading.max_daily_buy_equity_pct) leaves" in line for line in waiting)
+
+
+def test_on_a_shrunk_account_the_days_buy_limit_leaves_no_room_for_a_whole_buy_and_the_follow_buys_nothing() -> None:
+    """800,000 of BUYs already today on an account now worth 800,000: 110% of it leaves 80,000, short of a BUY of 200,000."""
+    buys, waiting = follow_of(800_000, ExecutionProvider.SHIOAJI, bought_on_sinopac_today(800_000), None)
+
+    assert (buys, [line.split(":")[0] for line in waiting]) == ([], ["2330", "2317", "1101"])
+
+
+@pytest.mark.parametrize(
+    ("trading_available", "kept"),
+    [(None, ["2330", "2317", "1101"]), (300_000.0, ["2330"]), (5_000_000.0, ["2330", "2317", "1101"])],
+    ids=["no-limit-known", "a-limit-of-one-buy", "a-limit-past-the-cash"],
+)
+def test_on_sinopac_a_follow_stays_inside_its_own_trading_limit_where_it_says_one_best_first(
+    trading_available: float | None, kept: list[str]
+) -> None:
+    buys, waiting = follow_of(1_000_000, ExecutionProvider.SHIOAJI, [], trading_available)
+
+    assert buys == kept
+    assert all("and SinoPac's own trading limit leaves" in line for line in waiting) and len(waiting) == 3 - len(kept)
+
+
+def test_the_mock_account_holds_a_follow_to_neither_limit() -> None:
+    assert follow_of(1_000_000, ExecutionProvider.MOCK, bought_on_sinopac_today(1_000_000), 1.0) == (["2330", "2317", "1101"], [])
+
+
+THREE = replace(FORMULA, name="revenue_and_high_top3", top=3)
+"""The formula the account followed last, of three stocks, before the switch to FORMULA's two."""
+
+
+def transition_of(
+    account: Account, broker: ExecutionProvider, last_finished: RankingFormula
+) -> tuple[list[TradeSignal], list[str], Account]:
+    """
+    A follow of 2330 and 2317 into `account` after a follow under `last_finished` left it nothing to trade: its BUYs and
+    SELLs, the sentences of what waits, and the account once each order filled at its decided price.
+    """
+    stocks = {stock_id: Stock(stock_id=stock_id, realtime_bar=bar(NOW, price)) for stock_id, price in CLOSES.items()}
+    earlier = follow(date(2026, 9, 14), at(date(2026, 9, 15), 9, 5), formula=last_finished)
+    answers = harness_config().ranking_follow_rule().apply(ranked("2330", "2317"), account, stocks, NOW, broker, [], None, [earlier])
+    decisions = [answer for answer in answers if isinstance(answer, TradeSignal)]
+    after = replace(account, positions=[replace(position) for position in account.positions])
+    cost_rule = harness_config().market.cost_rule()
+
+    for decision in decisions:
+        cost = cost_rule.apply(decision.action, decision.stock_id, decision.price_at_signal, decision.quantity, now=NOW)
+        if decision.action == TradeAction.SELL:
+            after.sell(decision.stock_id, decision.quantity, cost.net)
+        else:
+            after.buy(decision.stock_id, decision.quantity, price=decision.price_at_signal, total_cost=-cost.net)
+
+    return decisions, [answer for answer in answers if isinstance(answer, str)], after
+
+
+def equal_weights(account: Account, *stock_ids: str) -> list[float]:
+    """Each stock's value at its close over the account's equity at the closes, against its equal weight among `stock_ids`."""
+    value = {position.stock_id: position.quantity * CLOSES[position.stock_id] for position in account.positions}
+    equity = account.cash + sum(value.values())
+    return [value.get(stock_id, 0.0) / equity * len(stock_ids) for stock_id in stock_ids]
+
+
+def test_after_a_switch_to_a_formula_of_fewer_stocks_the_first_follow_on_the_mock_account_tops_up_what_it_holds() -> None:
+    """
+    The account holds the three stocks of its last formula at a third each. The follow under two sells the third and buys
+    each of the two up to half the account: without it the account would sit a third in cash until a stock rotates.
+    """
+    held = [Position(stock_id="2330", quantity=3333, average_cost=100.0), Position(stock_id="2317", quantity=6666, average_cost=50.0)]
+    account = Account(cash=70.0, positions=[*held, Position(stock_id="1101", quantity=11111, average_cost=30.0)])
+
+    decisions, waiting, after = transition_of(account, ExecutionProvider.MOCK, THREE)
+
+    assert [(decision.action, decision.stock_id) for decision in decisions] == [
+        (TradeAction.SELL, "1101"),
+        (TradeAction.BUY, "2330"),
+        (TradeAction.BUY, "2317"),
+    ]
+    assert not waiting and after.stock_ids == {"2330", "2317"}
+    assert all(0.97 <= weight <= 1 for weight in equal_weights(after, "2330", "2317")), "about 2% stays as cash, no more"
+    assert "up to its equal weight since the switch from revenue_and_high_top3" in decisions[1].reason
+
+
+def test_after_a_switch_the_first_follow_on_sinopac_tops_up_best_first_inside_the_cash_it_has_and_the_order_limit() -> None:
+    """
+    SinoPac pays a sale at settlement, so its follow tops up with the cash it has now. 500,000 pays for both BUYs of
+    250,000, each at most 25% of the equity. Beside a holding to sell, 200,000 pays for the best one's 200,000 alone, and
+    the other waits for the sale to settle.
+    """
+    held = [Position(stock_id="2330", quantity=2500, average_cost=100.0), Position(stock_id="2317", quantity=5000, average_cost=50.0)]
+    rich = Account(cash=500_000.0, positions=held)
+    short = Account(cash=200_000.0, positions=[*held, Position(stock_id="1101", quantity=6666, average_cost=30.0)])
+
+    decisions, waiting, after = transition_of(rich, ExecutionProvider.SHIOAJI, THREE)
+    first_only, waits, _ = transition_of(short, ExecutionProvider.SHIOAJI, THREE)
+
+    assert [(decision.stock_id, decision.quantity) for decision in decisions] == [
+        ("2330", affordable(250_000, 100)),
+        ("2317", affordable(250_000, 50)),
+    ]
+    assert not waiting and all(0.97 <= weight <= 1 for weight in equal_weights(after, "2330", "2317"))
+    assert [(decision.action, decision.stock_id) for decision in first_only] == [(TradeAction.SELL, "1101"), (TradeAction.BUY, "2330")]
+    assert len(waits) == 1 and waits[0].startswith("2317: a BUY of ") and "a sale's proceeds count once they settle" in waits[0]
+
+
+@pytest.mark.parametrize("broker", list(ExecutionProvider))
+@pytest.mark.parametrize(
+    ("shares_of_2317", "topped_up"), [(9500, []), (8800, ["2317"])], ids=["within-the-tolerance", "past-the-tolerance"]
+)
+def test_after_a_switch_a_holding_short_of_its_weight_by_no_more_than_the_tolerance_gets_no_top_up(
+    broker: ExecutionProvider, shares_of_2317: int, topped_up: list[str]
+) -> None:
+    """
+    Of an account worth about 1,000,000, each of the two ranked stocks weighs 500,000. 2330 holds 480,000, 4% short,
+    and 2317 475,000 or 440,000, 5% or 12% short: ranking.top_up_tolerance_pct, 10%, buys nothing within it.
+    """
+    held = [
+        Position(stock_id="2330", quantity=4800, average_cost=100.0),
+        Position(stock_id="2317", quantity=shares_of_2317, average_cost=50.0),
+    ]
+    account = Account(cash=1_000_000.0 - 480_000.0 - shares_of_2317 * 50.0, positions=held)
+
+    decisions, waiting, _ = transition_of(account, broker, THREE)
+
+    assert ([(decision.action, decision.stock_id) for decision in decisions], waiting) == (
+        [(TradeAction.BUY, stock_id) for stock_id in topped_up],
+        [],
+    )
+
+
+@pytest.mark.parametrize("broker", list(ExecutionProvider))
+def test_a_follow_under_the_formula_of_the_last_finished_follow_tops_up_nothing(broker: ExecutionProvider) -> None:
+    """Only the first follow after a switch tops up: under the same formula a ranked stock held is left as it is."""
+    held = [Position(stock_id="2330", quantity=2500, average_cost=100.0)]
+    account = Account(cash=750_000.0, positions=[*held, Position(stock_id="1101", quantity=100, average_cost=30.0)])
+
+    decisions, _, _ = transition_of(account, broker, FORMULA)
+
+    assert [(decision.action, decision.stock_id) for decision in decisions] == [(TradeAction.SELL, "1101"), (TradeAction.BUY, "2317")]
 
 
 def test_a_decision_is_finished_only_on_the_schedules_account_and_the_schedule_starts_once_a_day_on_any() -> None:
@@ -328,7 +518,7 @@ def saved_on_sinopac(harness: CliHarness, user: User) -> None:
 async def test_a_follow_on_sinopac_brings_the_simulation_account_to_the_ranking_inside_the_buy_limit() -> None:
     harness = site(sinopac=True)
     harness.real_broker.positions = [(await harness.broker.get_account()).buy("1101", 1000, price=30.0, total_cost=30_000.0)]
-    limit = harness.runtime.config.trading.max_order_value
+    limit = harness.runtime.config.trading.max_order_equity_pct * (harness.real_broker.cash + 1000 * CLOSES["1101"])
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
@@ -525,22 +715,117 @@ async def test_a_follow_on_sinopac_buys_with_the_cash_the_account_has_now_and_it
     harness = site(sinopac=True)
     harness.real_broker.cash = 150_000.0
     harness.real_broker.positions = [(await harness.broker.get_account()).buy("1101", 10_000, price=30.0, total_cost=300_000.0)]
-    limit = harness.runtime.config.trading.max_order_value
+    share = harness.runtime.config.trading.max_order_equity_pct
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
         await on_sinopac(client)
         started = await follow_ranking(client)
         run = await ended(client, started.json()["run_id"])
+        first_orders = (await client.get(f"/v1/runs/{started.json()['run_id']}/orders")).json()
         again = await follow_ranking(client)
         second = await ended(client, again.json()["run_id"])
 
+    # Each follow values the account anew: 150,000 and 10,000 x 30 first, then that less what the first one's trades cost.
+    equity, costs = 150_000.0 + 10_000 * CLOSES["1101"], sum(order["fee"] + order["tax"] for order in first_orders)
     waiting = [line for line in run["summary"]["execution_log"] if "Not followed now: 2317: a BUY of" in line]
-    assert sent(harness.real_broker)[:2] == [("1101", TradeAction.SELL, 10_000), ("2330", TradeAction.BUY, affordable(limit, 100))]
+    assert sent(harness.real_broker)[:2] == [
+        ("1101", TradeAction.SELL, 10_000),
+        ("2330", TradeAction.BUY, affordable(share * equity, 100)),
+    ]
     assert len(waiting) == 1 and "a sale's proceeds count once they settle" in waiting[0]
     assert [record.ranking_open for record in harness.journal.runs.values()] == [1, 0]
-    assert sent(harness.real_broker)[2:] == [("2317", TradeAction.BUY, affordable(limit, 50))], "the fake credits the sale at once"
+    assert sent(harness.real_broker)[2:] == [("2317", TradeAction.BUY, affordable(share * (equity - costs), 50))], (
+        "the fake credits the sale at once"
+    )
     assert second["summary"]["errors"] == [] and harness.broker.placed == []
+
+
+def finished_under(harness: CliHarness, formula: RankingFormula, broker: ExecutionProvider) -> None:
+    """A ranking follow of `broker`'s account a week ago under `formula` that left it nothing to trade, as its record says."""
+    started = harness.clock.now() - timedelta(days=7)
+    run = SystemStats(
+        workflow=Workflow.RANKING_FOLLOW,
+        execution_provider=broker,
+        start_time=started,
+        end_time=started,
+        ranking_decided_on=date(2026, 9, 14),
+        ranking_formula=formula,
+        ranking_open=0,
+    )
+    harness.journal.runs[run.run_id] = run
+
+
+async def test_after_a_switch_a_follow_on_sinopac_without_settled_cash_leaves_its_top_ups_open_and_the_next_sessions_buys_them() -> (
+    None
+):
+    """
+    The switch from three stocks to two: SinoPac pays Monday's sale of 1101 two sessions later, so Monday's follow sells
+    it and can top up neither held stock, and its record leaves both to trade. Tuesday's follow is still the first after
+    the switch and buys each up to its equal weight with the cash the sale brought, which the fake credits at once.
+    """
+    harness = site(sinopac=True)
+    harness.real_broker.cash = 0.0
+    harness.real_broker.positions = [
+        Position(stock_id="2330", quantity=2500, average_cost=100.0),
+        Position(stock_id="2317", quantity=5000, average_cost=50.0),
+        Position(stock_id="1101", quantity=10_000, average_cost=30.0),
+    ]
+    finished_under(harness, THREE, ExecutionProvider.SHIOAJI)
+
+    async with app_of(harness) as app, client_at(app) as client:
+        await signed_in(client)
+        await on_sinopac(client)
+        monday = await ended(client, (await follow_ranking(client)).json()["run_id"])
+        harness.clock.current_time += timedelta(days=1)
+
+        for stock_id, price in CLOSES.items():
+            harness.prices.realtime[stock_id] = bar(harness.clock.now() - timedelta(minutes=1), price)
+
+        tuesday = await ended(client, (await follow_ranking(client)).json()["run_id"])
+        page = (await client.get("/v1/rankings/follow")).json()
+
+    waiting = [
+        line.split("Not followed now: ")[1].split(":")[0] for line in monday["summary"]["execution_log"] if "Not followed now" in line
+    ]
+    assert (monday["state"], tuesday["state"], waiting) == ("finished", "finished", ["2330", "2317"])
+    assert [(stock_id, action) for stock_id, action, _ in sent(harness.real_broker)] == [
+        ("1101", TradeAction.SELL),
+        ("2330", TradeAction.BUY),
+        ("2317", TradeAction.BUY),
+    ]
+    assert all(0.9 <= weight <= 1 for weight in equal_weights(harness.real_broker.account_now(), "2330", "2317"))
+    assert [record.ranking_open for record in harness.journal.runs.values()] == [0, 2, 0]
+    assert page["refusal"] == "nothing_to_follow"
+
+
+async def test_a_follow_on_sinopac_plans_inside_the_days_buy_limit_and_sinopacs_trading_limit_and_the_gates_refuse_nothing() -> None:
+    """
+    The account is worth 1,000,000 and an earlier run bought 600,000 on SinoPac today: 110% of the equity leaves 500,000,
+    room for two BUYs of 250,000; SinoPac's own trading limit of 300,000 leaves room for one. The follow sends the best
+    one, records why the others wait, and no order it sends is refused for a limit.
+    """
+    harness = site(sinopac=True, formulas=(replace(FORMULA, top=3),))
+    harness.real_broker.trading_limit = 300_000.0
+    earlier_run = SystemStats(
+        workflow=Workflow.MANUAL_BUY, execution_provider=ExecutionProvider.SHIOAJI, start_time=harness.clock.now()
+    )
+    earlier = replace(order_of(), run_id=earlier_run.run_id, quantity=6000, status=OrderStatus.FILLED, created_at=harness.clock.now())
+    harness.journal.runs[earlier_run.run_id] = earlier_run
+    harness.journal.orders[earlier.id] = replace(earlier, filled_quantity=6000)
+
+    async with app_of(harness) as app, client_at(app) as client:
+        await signed_in(client)
+        await on_sinopac(client)
+        started = await follow_ranking(client)
+        run = await ended(client, started.json()["run_id"])
+        orders = (await client.get(f"/v1/runs/{started.json()['run_id']}/orders")).json()
+
+    waiting = [line.split("Not followed now: ")[1] for line in run["summary"]["execution_log"] if "Not followed now" in line]
+    assert [(order["stock_id"], order["status"]) for order in orders] == [("2330", "filled")]
+    assert [line.split(":")[0] for line in waiting] == ["2317", "1101"]
+    assert all("SinoPac's own trading limit leaves" in line for line in waiting)
+    assert harness.real_broker.requests.count("trading_available") == 1
 
 
 async def test_the_follow_account_and_the_schedules_time_are_saved_apart() -> None:

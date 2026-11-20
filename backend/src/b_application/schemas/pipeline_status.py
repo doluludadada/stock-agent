@@ -35,9 +35,11 @@ class PipelineStatus:
 
     equity: float | None = None
     """
-    AccountRiskCheck, once, before the run's first decision: the account's cash plus each position at the run's latest
-    price for it, kept for the whole run. Every automatic BUY's risk budget is analysis.risk_per_trade_pct of it. A
-    manual BUY's ManualSignal fixes its own equity and leaves this unset.
+    Once, before the run's first decision, by the step that decides: AccountRiskCheck in Buzz and Intraday, ManualSignal
+    in a manual BUY, RankingFollowSignals in a ranking follow. The account's cash plus each position at the run's latest
+    price for it, kept for the whole run. Every automatic BUY's risk budget is analysis.risk_per_trade_pct of it, and a
+    real broker's BUY limits are shares of it (BuyLimitRule). None in a follow of a run, which orders on the mock
+    account only and sizes nothing.
     """
 
     universe_stocks: list[Stock] = field(default_factory=list)

@@ -64,6 +64,7 @@ def quote_provider(
         connection=ShioajiConnection(client=client, up=True),
         new_client=FakeShioaji,
         login=ShioajiLogin(server=ShioajiServer.SIMULATION, api_key=SecretStr("key"), secret_key=SecretStr("secret")),
+        shioaji=shipped_config().shioaji,
         market_clock=CLOCK,
         market_data=market_data or MarketDataConfig(quote_request_interval_seconds=0),
         board_lot_shares=1000,
@@ -247,6 +248,7 @@ async def test_a_public_site_builds_no_shioaji_client_and_has_no_quote() -> None
 async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_quote_and_no_sinopac(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A reload right after the failed login logs in no sooner than shioaji.login_retry_seconds later."""
     without_keys = shioaji_site(ShioajiServer.SIMULATION)
     without_keys.shioaji = ShioajiConfig(
         _env_file=None, **without_keys.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
@@ -262,7 +264,7 @@ async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_qu
     for _ in ("startup", "reload"):
         assert await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION), shared, CLOCK) == (None, None)
 
-    assert [(len(client.logins), client.logouts) for client in made] == [(1, 0), (1, 0)]
+    assert [(len(client.logins), client.logouts) for client in made] == [(1, 0)]
 
 
 def made_clients(monkeypatch: pytest.MonkeyPatch, **fields: object) -> list[FakeShioaji]:

@@ -1,9 +1,7 @@
 import math
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Annotated
 
-from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.system.user import User
@@ -26,6 +24,7 @@ from a_domain.types.enums import (
     Workflow,
 )
 from a_domain.types.ids import RunId
+from a_domain.types.values import PositiveFiniteFloat
 
 
 @dataclass(frozen=True)
@@ -118,47 +117,72 @@ class SiteOrdering:
     server: ShioajiServer
 
 
+def may_have_bought(buys: Sequence[Order]) -> float:
+    """
+    What `buys`, BUYs on a real broker, may have bought at their limits: all of one while its outcome is open or unknown
+    (PENDING, SUBMITTED, UNCONFIRMED, FAILED), what filled once it ended, and nothing of one refused.
+    """
+    return math.fsum((buy.limit_price or 0) * (buy.filled_quantity if buy.status.fill_final else buy.quantity) for buy in buys)
+
+
 @dataclass(frozen=True)
 class BuyLimitRule:
     """
-    Why a BUY on a real broker may not be sent, or None: its value, the limit price times the shares, above
-    max_order_value, or with the day's earlier BUYs on that broker above max_daily_buy_value. An earlier BUY counts at
-    what it may have bought: all of it while its outcome is open or unknown (PENDING, SUBMITTED, UNCONFIRMED, FAILED), what filled
-    once it ended, and nothing when refused. The journal holds each order before it is sent, so the earlier BUYs are
-    every one that may have reached the broker. A BUY with no limit price, a MARKET order, has no value to hold to them,
-    so it is refused. A SELL is never held to them: it sells only shares the account holds.
+    Why a BUY on a real broker may not be sent, or None. Both limits follow the account on that broker: `equity` is its
+    cash plus each position at the run's price for it, as the run valued it once before its first decision
+    (PipelineStatus.equity). The BUY's value, its limit price times its shares, may be at most max_order_equity_pct of
+    the equity (order_value_limit), and with the day's earlier BUYs on that broker at most max_daily_buy_equity_pct of
+    it (daily_buy_limit). A ranking follow buys each stock at its equal weight and spends no more than the cash, and a
+    BUY sized on its risk budget takes analysis.risk_per_trade_pct over analysis.stop_loss_pct of the equity, so both
+    catch a run that buys far more than that, not a normal one. An earlier BUY counts at what it may have bought
+    (may_have_bought). The journal holds each order before it is sent, so the earlier BUYs are every one that may have
+    reached the broker. A BUY with no limit price, a MARKET order, has no value to hold to them, and one of a run that
+    valued no account has no limits to be held to, so both are refused. A SELL is never held to them: it sells only
+    shares the account holds.
     """
 
-    max_order_value: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    max_daily_buy_value: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    max_order_equity_pct: PositiveFiniteFloat
+    max_daily_buy_equity_pct: PositiveFiniteFloat
 
-    def apply(self, order: Order, earlier_buys: Sequence[Order]) -> tuple[RejectReason, str] | None:
+    def apply(self, order: Order, earlier_buys: Sequence[Order], equity: float | None) -> tuple[RejectReason, str] | None:
         if order.action != TradeAction.BUY:
             return None
 
+        limits = "trading.max_order_equity_pct and trading.max_daily_buy_equity_pct"
+
         if order.limit_price is None:
-            limits = "trading.max_order_value and trading.max_daily_buy_value"
             return RejectReason.ORDER_VALUE_LIMIT, f"has no limit price to value against {limits}"
 
-        value = order.limit_price * order.quantity
+        if equity is None:
+            return RejectReason.ORDER_VALUE_LIMIT, f"its run valued no account to derive {limits} from"
 
-        if value > self.max_order_value:
+        value, order_limit = order.limit_price * order.quantity, order_value_limit(self, equity)
+
+        if value > order_limit:
+            share = f"trading.max_order_equity_pct {self.max_order_equity_pct:.0%} of the equity {equity:,.0f}"
+            return RejectReason.ORDER_VALUE_LIMIT, f"costs {value:,.0f} at its limit, above {order_limit:,.0f}: {share}"
+
+        bought = may_have_bought([earlier for earlier in earlier_buys if earlier.id != order.id])
+        daily_limit = daily_buy_limit(self, equity)
+
+        if bought + value > daily_limit:
+            share = f"trading.max_daily_buy_equity_pct {self.max_daily_buy_equity_pct:.0%} of the equity {equity:,.0f}"
             return (
-                RejectReason.ORDER_VALUE_LIMIT,
-                f"costs {value:,.0f} at its limit, above trading.max_order_value {self.max_order_value:,.0f}",
+                RejectReason.DAILY_BUY_LIMIT,
+                f"costs {value:,.0f} after {bought:,.0f} of BUYs today, above {daily_limit:,.0f}: {share}",
             )
 
-        bought = math.fsum(
-            (earlier.limit_price or 0) * (earlier.filled_quantity if earlier.status.fill_final else earlier.quantity)
-            for earlier in earlier_buys
-            if earlier.id != order.id
-        )
-
-        if bought + value > self.max_daily_buy_value:
-            limit = f"trading.max_daily_buy_value {self.max_daily_buy_value:,.0f}"
-            return RejectReason.DAILY_BUY_LIMIT, f"costs {value:,.0f} after {bought:,.0f} of BUYs today, above {limit}"
-
         return None
+
+
+def order_value_limit(rule: BuyLimitRule, equity: float) -> float:
+    """The most one BUY on a real broker may cost at its limit, fees aside: max_order_equity_pct of `equity`."""
+    return rule.max_order_equity_pct * equity
+
+
+def daily_buy_limit(rule: BuyLimitRule, equity: float) -> float:
+    """The most the day's BUYs on a real broker may cost together at their limits, fees aside: max_daily_buy_equity_pct of `equity`."""
+    return rule.max_daily_buy_equity_pct * equity
 
 
 @dataclass(frozen=True)
@@ -297,7 +321,7 @@ class BrokerAccessRule:
     broker its run chose when it started, and one the site's audience and order pricing offer (`brokers`). A real
     broker must then pass its gate (RealBrokerGateRule: the workflow on the login's server, who may order, the login
     on the server the settings on disk name), and a BUY no earlier BUY of its stock still open (UnsettledBuyRule)
-    and its limits (BuyLimitRule).
+    and its limits (BuyLimitRule), derived from `equity`, the account on that broker as the order's run valued it.
     """
 
     brokers: frozenset[ExecutionProvider]
@@ -314,6 +338,7 @@ class BrokerAccessRule:
         user: User | None,
         ordering: SiteOrdering | None,
         earlier_buys: Sequence[Order],
+        equity: float | None,
     ) -> tuple[RejectReason, str] | None:
         broker = link.broker
 
@@ -329,7 +354,7 @@ class BrokerAccessRule:
         return (
             self.gate_rule.apply(workflow, broker, link, user, ordering)
             or self.unsettled_rule.apply(order, earlier_buys)
-            or self.limit_rule.apply(order, earlier_buys)
+            or self.limit_rule.apply(order, earlier_buys, equity)
         )
 
 
@@ -339,10 +364,11 @@ class OrderRule:
     Turns a BUY or SELL decision into the order the app may send now, or into a REJECTED order that says why not
     (OrderGateRule).
 
-    Every order is a LIMIT at the decision's price with time in force IOC:
-    - LIMIT at the price the decision saw, as an exchange tick (LimitPriceRule). A traded price is a tick, so no fill
-      is worse than what was decided on. A price off the tick grid rounds up for a BUY and down for a SELL, at most
-      one tick, so the order still executes at that price.
+    Every order is a marketable LIMIT with time in force IOC:
+    - LIMIT at most trading.limit_offset_pct past the price the decision saw, on the exchange's tick grid
+      (LimitPriceRule): a BUY's above it, a SELL's below it. The exchange fills it at the market's price, so the limit
+      bounds what a fill may cost and lets an order through when the market moved a few ticks since the quote. The
+      order keeps the price the decision saw, which the mock account fills at.
     - IOC trades what is available at that price now and cancels the rest at once. The app tracks no
       working orders (no cancel, no expiry, no reconciliation), so ROD is out: its remainder could fill
       hours later at a price no decision saw. FOK is out because sizing gives a maximum, not a target:
@@ -368,6 +394,7 @@ class OrderRule:
             time_in_force=TimeInForce.IOC,
             quantity=signal.quantity,
             limit_price=self.limit_price_rule.apply(action, signal.stock_id, signal.price_at_signal),
+            price_at_signal=signal.price_at_signal,
             created_at=now,
             updated_at=now,
         )

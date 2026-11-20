@@ -243,8 +243,9 @@ const admin = {
         most_traded_count: 'Most traded stocks listed',
       },
       trading: {
-        max_order_value: 'Most per SinoPac BUY (NT$)',
-        max_daily_buy_value: 'Most SinoPac BUYs per day (NT$)',
+        limit_offset_pct: 'Furthest a limit lies past the decided price',
+        max_order_equity_pct: 'Most per SinoPac BUY (share of the equity)',
+        max_daily_buy_equity_pct: 'Most SinoPac BUYs per day (share of the equity)',
       },
       mock_trading: {
         initial_cash: 'Starting cash of a mock account',
@@ -290,6 +291,7 @@ const admin = {
         decision_day: 'Decision day of the month',
         formulas: 'Formulas',
         active_formula: 'Formula in use',
+        top_up_tolerance_pct: 'Shortfall of a held stock left after a switch',
         evidence_min_traded_value: 'Liquidity floor of the comparison (NT$)',
         revenue_short_months: 'Recent revenue months of the trend',
         revenue_long_months: 'Revenue months the trend compares with',
@@ -495,8 +497,9 @@ const admin = {
         most_traded_count: 'How many of the latest session’s most traded stocks, by shares, the market overview lists.',
       },
       trading: {
-        max_order_value: 'The most one SinoPac BUY may cost, in NT$ at its limit price, fees aside. The server refuses a BUY past it. It holds SinoPac BUYs only: a SELL and a mock order are never held to it.',
-        max_daily_buy_value: 'The most the SinoPac BUYs of one Taiwan calendar day may cost together, in NT$ at their limit prices, fees aside. The server refuses the BUY that would pass it. It holds SinoPac BUYs only: a SELL and a mock order are never held to it.',
+        limit_offset_pct: 'How far an order’s limit price may lie past the price its decision saw, on every account: a BUY’s at most this share above it, a SELL’s at most this share below it, on the exchange’s tick grid. The exchange fills such a limit at the market’s price, so this bounds what a fill may cost and lets an order fill when the price moved a few ticks since the quote; the mock account fills at the price the decision saw. BUYs are sized at the limit, fee included. 0 limits each order at the decided price.',
+        max_order_equity_pct: 'The most one SinoPac BUY may cost at its limit price, fees aside, as a share of the account’s equity as the run values it: its cash plus each holding at the run’s price. A ranking follow of 10 stocks buys each at 10% and a BUY sized on its risk budget at 20%, so 25% lets both through and stops a BUY far larger. A follow is sized inside it; the server refuses any other BUY past it. It holds SinoPac BUYs only: a SELL and a mock order are never held to it.',
+        max_daily_buy_equity_pct: 'The most the SinoPac BUYs of one Taiwan calendar day may cost together at their limit prices, fees aside, as a share of the account’s equity as each run values it. A follow that puts the whole account into the ranking spends 100% at most, so 110% lets it through and stops a run that keeps buying. A follow keeps its best stocks within it and leaves the rest to its next session; the server refuses any other BUY that would pass it. It holds SinoPac BUYs only: a SELL and a mock order are never held to it.',
       },
       mock_trading: {
         initial_cash: 'Each user’s mock account starts with this cash the first time it is read.',
@@ -543,7 +546,9 @@ const admin = {
         formulas:
           'The formulas the ranking can be made by, each with its name, the factors whose ranks it sums (revenue_acceleration, revenue_yoy, nearness_to_high, price_momentum), how many stocks it holds, its price and liquidity floors, and the sessions of the benchmark average under which it holds cash. A formula the ranking cannot express is refused.',
         active_formula:
-          'The formula the ranking, every stock’s score, the backtest and a follow use from this save on. The ranking page compares all of them over the same period. A formula that did best in the past is not thereby the best next.',
+          'The formula the ranking, every stock’s score, the backtest and a follow use from this save on. After a switch an account’s follows also buy each ranked stock the account holds up to its equal weight, so a switch from 20 stocks to 10 does not leave half the account in cash. On SinoPac a sale’s money arrives two sessions later, so a follow that could not buy a top-up yet leaves the decision open, and the next session’s follow buys it with the money that arrived. Once a follow left nothing to trade, every later follow leaves a held stock as it is. The ranking page compares all of them over the same period. A formula that did best in the past is not thereby the best next.',
+        top_up_tolerance_pct:
+          'After a switch of the formula in use, a ranked stock the account holds is bought up to its equal weight only while it is worth less than that weight by more than this share of it. A follow sizes each BUY at its limit, up to the order limit offset above the price, so the mock account keeps about that much of each weight as cash; without this a follow would buy a few more shares every session at the NT$20 minimum fee.',
         evidence_min_traded_value: 'The ranking page replays every formula a second time among the stocks that trade this many NT dollars a session, in place of the formula’s own floor.',
         revenue_short_months: 'The revenue trend on the stock page and My holdings is the mean revenue of this many latest months over that of the months it is compared with.',
         revenue_long_months: 'The latest months whose mean revenue the trend’s recent months are compared with. A stock missing any of them has no trend.',
@@ -581,6 +586,7 @@ const admin = {
       '0050': '0050 元大台灣50',
       '006208': '006208 富邦台50',
       revenue_and_high: 'Revenue acceleration + near the high',
+      revenue_and_high_top10: 'Revenue acceleration + near the high, top 10',
       revenue_and_high_cash_60: 'Revenue acceleration + near the high, cash under the 60-session average',
       dev: 'Development (dev)',
       test: 'Staging (test)',

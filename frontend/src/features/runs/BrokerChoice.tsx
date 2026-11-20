@@ -34,7 +34,7 @@ export function BrokerChoice({ offers, value, onChange }: BrokerChoiceProps) {
             {t(`broker.server.${chosen.server}`, { name: t(`common:broker.name.${chosen.broker}`) })}
           </p>
           <p className="text-xs text-pretty text-muted-foreground">
-            {t('broker.limits', { order: format.number(chosen.max_order_value), daily: format.number(chosen.max_daily_buy_value) })}
+            {t('broker.limits', { order: format.percent(chosen.max_order_equity_pct, 0), daily: format.percent(chosen.max_daily_buy_equity_pct, 0) })}
           </p>
         </div>
       )}

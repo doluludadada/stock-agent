@@ -55,8 +55,8 @@ describe('a run the server refuses to start', { timeout: 20_000 }, () => {
   })
 })
 
-const MOCK = { broker: 'mock', server: null, max_order_value: null, max_daily_buy_value: null }
-const SINOPAC = { broker: 'shioaji', server: 'simulation', max_order_value: 100_000, max_daily_buy_value: 300_000 }
+const MOCK = { broker: 'mock', server: null, max_order_equity_pct: null, max_daily_buy_equity_pct: null }
+const SINOPAC = { broker: 'shioaji', server: 'simulation', max_order_equity_pct: 0.25, max_daily_buy_equity_pct: 1.1 }
 
 /** The runs page against a server that offers these brokers and answers a start of Buzz with `answer`. */
 function serveBuzz(brokers: unknown[], answer: { status: number; body: unknown } = { status: 202, body: { run_id: '44444444-4444-4444-8444-444444444444' } }) {
@@ -126,7 +126,9 @@ describe('the account a Buzz run orders on', { timeout: 20_000 }, () => {
 
     await user.click(within(accounts).getByRole('radio', { name: 'SinoPac account · Simulation' }))
     expect(within(dialog).getByText('SinoPac account: Simulation, no real money')).toBeVisible()
-    expect(within(dialog).getByText('Each BUY up to NT$100,000, and BUYs up to NT$300,000 per Taiwan day. The server refuses a BUY past them.')).toBeVisible()
+    expect(
+      within(dialog).getByText('Each BUY up to 25% of the account’s equity, and BUYs up to 110% of it per Taiwan day. The server refuses a BUY past them.'),
+    ).toBeVisible()
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
     dialog = await openBuzz(user)

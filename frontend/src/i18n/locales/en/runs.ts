@@ -88,7 +88,7 @@ const runs = {
   broker: {
     label: 'Account for the orders',
     server: { simulation: '{{name}}: Simulation, no real money', production: '{{name}}: Production, real money' },
-    limits: 'Each BUY up to NT${{order}}, and BUYs up to NT${{daily}} per Taiwan day. The server refuses a BUY past them.',
+    limits: 'Each BUY up to {{order}} of the account’s equity, and BUYs up to {{daily}} of it per Taiwan day. The server refuses a BUY past them.',
   },
   buy: {
     button: 'BUY…',

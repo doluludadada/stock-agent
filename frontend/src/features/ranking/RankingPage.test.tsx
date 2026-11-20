@@ -97,6 +97,7 @@ const order = (stockId: string, action: Order['action'], status: Order['status']
   order_type: 'limit',
   quantity: 1000,
   limit_price: 512,
+  price_at_signal: 512,
   time_in_force: 'rod',
   status,
   reason,

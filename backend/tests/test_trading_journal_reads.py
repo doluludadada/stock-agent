@@ -138,6 +138,7 @@ def journal_order(run_id: RunId) -> Order:
         order_type=OrderType.LIMIT,
         quantity=1000,
         limit_price=100.0,
+        price_at_signal=100.0,
         time_in_force=TimeInForce.IOC,
         created_at=at,
         updated_at=at,

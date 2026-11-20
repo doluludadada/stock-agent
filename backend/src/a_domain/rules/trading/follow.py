@@ -1,3 +1,4 @@
+import math
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence, Sized
 from dataclasses import replace
@@ -14,7 +15,15 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.cost import AffordableQuantityRule
-from a_domain.rules.trading.order_rule import BrokerLink, RealBrokerGateRule, SiteOrdering
+from a_domain.rules.trading.order_rule import (
+    BrokerLink,
+    BuyLimitRule,
+    RealBrokerGateRule,
+    SiteOrdering,
+    daily_buy_limit,
+    may_have_bought,
+    order_value_limit,
+)
 from a_domain.rules.trading.ranking import DecisionSessionsRule, Ranking, RankingHistory
 from a_domain.rules.trading.tick import LimitPriceRule
 from a_domain.types.enums import (
@@ -29,7 +38,7 @@ from a_domain.types.enums import (
     TradingPhase,
     Workflow,
 )
-from a_domain.types.values import NonEmptyText, PositiveFiniteFloat
+from a_domain.types.values import Fraction, NonEmptyText
 
 
 @dataclass(frozen=True)
@@ -348,9 +357,36 @@ class FollowScheduleRule:
 def sale_proceeds(
     sell: TradeSignal, now: datetime, limit_price_rule: LimitPriceRule, affordable_quantity_rule: AffordableQuantityRule
 ) -> float:
+    """What `sell` brings after its fee and tax at its limit, the least it fills at: up to trading.limit_offset_pct under its price."""
     limit_price = limit_price_rule.apply(TradeAction.SELL, sell.stock_id, sell.price_at_signal)
 
     return affordable_quantity_rule.cost_rule.apply(TradeAction.SELL, sell.stock_id, limit_price, sell.quantity, now=now).net
+
+
+def ranking_decision(ranking: Ranking) -> str:
+    """The decision a follow takes, as each of its decisions' reasons names it."""
+    return f"the monthly ranking {ranking.formula.name} decided at the close of {ranking.decided_on}"
+
+
+def ranking_sales(
+    ranking: Ranking, account: Account, left: Sequence[str], priced: Mapping[str, Stock], now: datetime
+) -> list[TradeSignal]:
+    """A SELL of every share of each holding of `left`, which the ranking left, at its price in `priced`."""
+    return [
+        TradeSignal.of(
+            priced[stock_id], now, TradeAction.SELL, SignalSource.RANKING, 0, f"Left {ranking_decision(ranking)}", position.quantity
+        )
+        for stock_id in left
+        if (position := account.position_for(stock_id))
+    ]
+
+
+def buy_reason(ranking: Ranking, stock_id: str, switched: RankingFormula | None) -> str:
+    """A follow's BUY of `stock_id`: its place in the ranking, and for a top-up the formula switched from (switched_from)."""
+    place = next(place for place, stock in enumerate(ranking.stocks, 1) if stock.stock_id == stock_id)
+    reason = f"Place {place} of {ranking_decision(ranking)}"
+
+    return f"{reason}, up to its equal weight since the switch from {switched.name}" if switched is not None else reason
 
 
 def buy_decision(rule: RankingFollowRule, stock: Stock, budget: float, reason: str, now: datetime) -> TradeSignal | str:
@@ -365,12 +401,136 @@ def buy_decision(rule: RankingFollowRule, stock: Stock, budget: float, reason: s
     return TradeSignal.of(stock, now, TradeAction.BUY, SignalSource.RANKING, 0, reason, quantity)
 
 
-def buys_paid_for(rule: RankingFollowRule, buys: Sequence[TradeSignal | str], cash: float, now: datetime) -> list[TradeSignal | str]:
+def switched_from(follows: Sequence[SystemStats], formula: RankingFormula) -> RankingFormula | None:
     """
-    `buys` as given, best first, each BUY kept whole while `cash` still pays for it at its limit, fee included, after
-    the BUYs kept before it. A BUY the cash does not pay for becomes a sentence saying so: it is not made smaller, so
-    a later follow buys it at its full share.
+    The formula of the account's last finished ranking follow, of `follows` oldest first the last that left it nothing
+    to trade, while it is another than `formula`: the active formula was switched since, and no follow under it
+    finished. None before the account finished any follow, and once one under `formula` did.
     """
+    finished = [follow.ranking_formula for follow in follows if left_nothing_to_trade(follow) and follow.ranking_formula is not None]
+
+    return finished[-1] if finished and finished[-1] != formula else None
+
+
+def short_of_weight(position: Position, stock: Stock | None, weight: float, tolerance: float) -> bool:
+    """
+    Whether `position`, at the run's price of `stock`, is worth less than `weight` by more than `tolerance` of it, or may
+    be: a stock without a price.
+    """
+    if stock is None or stock.current_price is None:
+        return True
+
+    return weight - position.quantity * stock.current_price > tolerance * weight
+
+
+@dataclass(frozen=True)
+class TopUpRule:
+    """
+    The ranked stocks an account holds that a ranking follow tops up to their equal weight, best first. None but on a
+    follow after a switch of the active formula: while the account's last finished ranking follow, the last of
+    `follows` (oldest first) that left it nothing to trade, used another formula than the ranking's (switched_from).
+    There, each ranked stock it holds of `positions` whose position, at its price in `priced`, is worth less than its
+    equal weight, `equity` over the ranking's stocks, by more than `tolerance` of that weight, and each without a price,
+    which may be. Before the run valued the account (`equity` None) every ranked stock it holds may be one, so a switch
+    follow of an account that holds the ranking alone has something to follow.
+
+    A follow that tops up counts each it did not buy as left to trade, so the schedule tries the decision again on the
+    next session, still a switch follow, with the cash that settled since: on SinoPac, which pays a sale at settlement,
+    the first follow after a switch may top up nothing. The tolerance keeps the mock account from buying a few shares
+    every session: a BUY sized at its limit, up to trading.limit_offset_pct above the price it fills at, leaves about
+    that share of the weight unbought, and each BUY pays a minimum fee.
+    """
+
+    tolerance: Fraction
+
+    def apply(
+        self,
+        ranking: Ranking,
+        positions: Sequence[Position],
+        follows: Sequence[SystemStats],
+        priced: Mapping[str, Stock],
+        equity: float | None,
+    ) -> list[str]:
+        held = {position.stock_id: position for position in positions}
+        ranked = [stock.stock_id for stock in ranking.stocks if stock.stock_id in held]
+
+        if not ranked or switched_from(follows, ranking.formula) is None:
+            return []
+
+        if equity is None:
+            return ranked
+
+        weight = equity / len(ranking.stocks)
+        return [stock_id for stock_id in ranked if short_of_weight(held[stock_id], priced.get(stock_id), weight, self.tolerance)]
+
+
+def buy_wants(account: Account, ranking: Ranking, buying: Sequence[str]) -> dict[str, float]:
+    """
+    What each BUY of `buying`, priced stocks of the ranking, wants to cost, best first: its equal weight, the account's
+    equity over the ranking's stocks, less what the account's position of it is worth at the run's price. A stock it
+    lacks wants the whole weight; one it holds at its weight or more wants nothing and is left out.
+    """
+    weight = account.equity / len(ranking.stocks) if ranking.stocks else 0.0
+    held = {position.stock_id: position.market_value for position in account.positions}
+    wants = {stock.stock_id: weight - held.get(stock.stock_id, 0.0) for stock in ranking.stocks if stock.stock_id in buying}
+
+    return {stock_id: want for stock_id, want in wants.items() if want > 0 or stock_id not in held}
+
+
+def buy_budgets(
+    rule: RankingFollowRule, account: Account, broker: ExecutionProvider, wants: Mapping[str, float], cash: float
+) -> dict[str, float]:
+    """
+    What each BUY of a follow may cost, by stock: what it wants (buy_wants). On a broker that credits a sale at its fill
+    every BUY is cut by the same share until together they want no more than `cash`, the account's cash with this
+    follow's sales in it, so every BUY is made smaller alike; on a real broker none costs more than one BUY may cost
+    there (order_value_limit).
+    """
+    wanted = sum(wants.values())
+    share = min(1.0, cash / wanted) if broker.credits_sales_at_once and wanted > 0 else 1.0
+    most = order_value_limit(rule.buy_limit_rule, account.equity) if broker.real else math.inf
+
+    return {stock_id: min(want * share, most) for stock_id, want in wants.items()}
+
+
+def buying_bounds(
+    rule: RankingFollowRule,
+    account: Account,
+    broker: ExecutionProvider,
+    earlier_buys: Sequence[Order],
+    trading_available: float | None,
+) -> dict[str, float]:
+    """
+    What a follow's BUYs together may cost on `broker` now, each bound named by what sets it. A broker that pays a sale
+    at settlement (ExecutionProvider.credits_sales_at_once) accepts a BUY on the cash the account has now alone. A real
+    broker holds the day's BUYs to the day's BUY limit (BuyLimitRule), so the BUYs take no more than what its earlier
+    BUYs of the day left of it; and it may hold the account to its own trading limit, which the follow then stays in
+    where the broker says one (`trading_available`). The mock account credits a sale at its fill and has no BUY limit:
+    it bounds nothing here.
+    """
+    bounds = {} if broker.credits_sales_at_once else {"the account's cash (a sale's proceeds count once they settle)": account.cash}
+
+    if not broker.real:
+        return bounds
+
+    room = daily_buy_limit(rule.buy_limit_rule, account.equity) - may_have_bought(earlier_buys)
+    bounds["the day's BUY limit (trading.max_daily_buy_equity_pct)"] = room
+
+    if trading_available is not None:
+        bounds[f"{broker.label}'s own trading limit"] = trading_available
+
+    return bounds
+
+
+def buys_paid_for(
+    rule: RankingFollowRule, buys: Sequence[TradeSignal | str], bounds: Mapping[str, float], now: datetime
+) -> list[TradeSignal | str]:
+    """
+    `buys` as given, best first, each BUY kept whole while every bound of `bounds` still pays for it at its limit, fee
+    included, after the BUYs kept before it. A BUY one bound does not pay for becomes a sentence naming that bound: it
+    is not made smaller, so a later follow buys it at its full share, and the BUYs after it are tried.
+    """
+    left = dict(bounds)
     paid: list[TradeSignal | str] = []
 
     for buy in buys:
@@ -380,16 +540,16 @@ def buys_paid_for(rule: RankingFollowRule, buys: Sequence[TradeSignal | str], ca
 
         limit_price = rule.limit_price_rule.apply(TradeAction.BUY, buy.stock_id, buy.price_at_signal)
         cost = -rule.affordable_quantity_rule.cost_rule.apply(TradeAction.BUY, buy.stock_id, limit_price, buy.quantity, now=now).net
+        short = next((bound for bound, amount in left.items() if cost > amount), None)
 
-        if cost > cash:
+        if short is not None:
             paid.append(
-                f"{buy.stock_id}: a BUY of {buy.quantity} costs {cost:,.0f}, and the account has {cash:,.0f} to buy with now; "
-                "a sale's proceeds count once they settle"
+                f"{buy.stock_id}: a BUY of {buy.quantity} costs {cost:,.0f}, and {short} leaves {left[short]:,.0f} to buy with now"
             )
             continue
 
         paid.append(buy)
-        cash -= cost
+        left = {bound: amount - cost for bound, amount in left.items()}
 
     return paid
 
@@ -399,56 +559,73 @@ class RankingFollowRule:
     """
     The decisions that bring an account on `broker` to the ranking at `now`, the sales first: a SELL of every share of
     each holding the ranking left, and a BUY of each ranked stock the account lacks. A ranked stock it holds already is
-    left as it is, so a follow of a ranking it already holds decides nothing. Each BUY gets the same budget: the
-    account's equity over the ranking's stocks, its equal weight, and on a real broker no more than `max_order_value`,
-    the most one BUY may cost there (BuyLimitRule), so a BUY is sized inside that limit and never refused for its own
-    size. Its quantity is the most `lot_size` lots that budget pays for at the order's limit, fee included.
+    left as it is, so a follow of a ranking it already holds decides nothing, and no purchase is split over sessions.
+    One follow differs: while the account's last finished follow, the last of `follows` (its ranking follows, oldest
+    first) that left it nothing to trade, used another formula than the ranking's (switched_from), the follow also tops
+    up each ranked stock the account holds that falls short of its equal weight by more than
+    ranking.top_up_tolerance_pct of it (TopUpRule), with a BUY of what its position lacks of the weight at the run's
+    price, inside the same bounds and best first. A switch from 20 stocks to 10 would otherwise sell ten and buy
+    nothing, half the account in cash until stocks rotate. A top-up the follow does not buy is left to trade, so the
+    follow does not finish the decision and the next one is a switch follow again; once a follow under the new formula
+    finished, no later one tops up.
 
-    The BUYs together cost no more than the cash the account can buy with now, and how they fit it depends on when
-    the broker credits a sale (ExecutionProvider.credits_sales_at_once). The mock account credits a sale at its fill,
-    so there the cash holds what this follow's sales bring after their fee and tax, and every BUY is made smaller
-    alike until all fit: the budget is no more than a BUY's share of that cash. A broker that pays a sale at
-    settlement accepts a BUY on the cash it has now alone. There no BUY is made smaller: the BUYs are kept best first
-    while the account's cash, without this follow's sales, pays for them whole, and the rest wait for a follow after
-    the sales settled. A smaller BUY would leave the account holding the stock, and no later follow would add to it.
+    Each BUY's budget is what it wants (buy_wants): the account's equity, as the run valued it, over the ranking's
+    stocks, its equal weight, less what the account holds of the stock, and on a real broker no more than the most one
+    BUY may cost there (order_value_limit), so a BUY is sized inside that limit and never refused for its own size. Its
+    quantity is the most `lot_size` lots that budget pays for at the order's limit, fee included, so it stays affordable
+    whatever the market fills it at. The mock account fills at the decided price, so there about trading.limit_offset_pct
+    (2%) of what a follow bought, and as much of what it sold, stays as cash: its BUYs are sized at their limits above
+    the decided prices and its sales counted at their limits below them (sale_proceeds).
 
-    A stock without a price, whose budget buys no lot, or that the cash does not pay for now gets a sentence saying so
-    in place of a decision, and stays open to the next follow. The order gates judge each price when its order is
-    placed, and on a real broker the day's BUY limit: a BUY past it is refused there, recorded, and left to a later
-    follow.
+    The BUYs together cost no more than what the account may buy with now, and how they fit it depends on when the
+    broker credits a sale (ExecutionProvider.credits_sales_at_once). The mock account credits a sale at its fill, so
+    there the cash holds what this follow's sales bring after their fee and tax, and every BUY is made smaller alike
+    until all fit (buy_budgets). Elsewhere no BUY is made smaller: the BUYs are kept best first while every bound of
+    buying_bounds pays for them whole (the cash the account has now, without this follow's sales, and on a real broker
+    what the day's BUY limit leaves after the day's earlier BUYs, `earlier_buys`, and the broker's own trading limit
+    where it says one, `trading_available`), and the rest wait for a later follow. A smaller BUY would leave the account
+    holding the stock, and no later follow but the first after a switch would add to it.
+
+    A stock without a price, whose budget buys no lot, or that a bound does not pay for now gets a sentence saying so
+    in place of a decision, and stays open to the next follow, a top-up too: on SinoPac, which pays a sale at
+    settlement, the first follow after a switch tops up with the cash the account has before its sales settle, and the
+    next session's follow with the cash that settled since. The order gates judge each price when its order is placed,
+    and on a real broker the BUY limits again, against BUYs another run sent since.
     """
 
     lot_size: PositiveInt
-    max_order_value: PositiveFiniteFloat
+    buy_limit_rule: BuyLimitRule
     limit_price_rule: LimitPriceRule
     affordable_quantity_rule: AffordableQuantityRule
+    top_up_rule: TopUpRule
 
     def apply(
-        self, ranking: Ranking, account: Account, stocks: Mapping[str, Stock], now: datetime, broker: ExecutionProvider
+        self,
+        ranking: Ranking,
+        account: Account,
+        stocks: Mapping[str, Stock],
+        now: datetime,
+        broker: ExecutionProvider,
+        earlier_buys: Sequence[Order],
+        trading_available: float | None,
+        follows: Sequence[SystemStats],
     ) -> list[TradeSignal | str]:
         holdings = RankingHoldingsRule().apply(ranking, account.stock_ids)
-        priced = {stock_id: stock for stock_id in holdings.open if (stock := stocks.get(stock_id)) and stock.current_price}
-        unpriced = [
-            f"{stock_id} has neither a realtime quote nor an official close" for stock_id in holdings.open if stock_id not in priced
-        ]
-        decision = f"the monthly ranking {ranking.formula.name} decided at the close of {ranking.decided_on}"
-        sells = [
-            TradeSignal.of(priced[stock_id], now, TradeAction.SELL, SignalSource.RANKING, 0, f"Left {decision}", position.quantity)
-            for stock_id in holdings.left
-            if stock_id in priced and (position := account.position_for(stock_id))
-        ]
-        entrants = [stock_id for stock_id in holdings.lacking if stock_id in priced]
+        former = switched_from(follows, ranking.formula)
+        topped_up = self.top_up_rule.apply(ranking, account.positions, follows, stocks, account.equity)
+        traded = [*holdings.open, *topped_up]
+        priced = {stock_id: stock for stock_id in traded if (stock := stocks.get(stock_id)) and stock.current_price}
+        unpriced = [f"{stock_id} has neither a realtime quote nor an official close" for stock_id in traded if stock_id not in priced]
+        sells = ranking_sales(ranking, account, [stock_id for stock_id in holdings.left if stock_id in priced], priced, now)
+        wants = buy_wants(account, ranking, [stock_id for stock_id in [*holdings.lacking, *topped_up] if stock_id in priced])
         cash = account.cash + sum(sale_proceeds(sell, now, self.limit_price_rule, self.affordable_quantity_rule) for sell in sells)
-        weight = account.equity / len(ranking.stocks) if entrants else 0.0
-        budget = min(weight, cash / len(entrants)) if entrants and broker.credits_sales_at_once else weight
-        budget = min(budget, self.max_order_value) if broker.real else budget
-        places = {stock.stock_id: place for place, stock in enumerate(ranking.stocks, 1)}
-        buys = [buy_decision(self, priced[stock_id], budget, f"Place {places[stock_id]} of {decision}", now) for stock_id in entrants]
+        buys = [
+            buy_decision(self, priced[stock_id], budget, buy_reason(ranking, stock_id, former if stock_id in topped_up else None), now)
+            for stock_id, budget in buy_budgets(self, account, broker, wants, cash).items()
+        ]
+        bounds = buying_bounds(self, account, broker, earlier_buys, trading_available)
 
-        if not broker.credits_sales_at_once:
-            buys = buys_paid_for(self, buys, account.cash, now)
-
-        return [*unpriced, *sells, *buys]
+        return [*unpriced, *sells, *buys_paid_for(self, buys, bounds, now)]
 
 
 @dataclass(

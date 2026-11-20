@@ -39,7 +39,9 @@ from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 from d_presentation import dependencies
 from d_presentation.dependencies import ProcessState, build_provider_dependencies, get_project_root, load_settings, open_runtime
-from d_presentation.live_runtime import ReloadRefused, RuntimeSwitch, SettingsReloaded, collect_daily_data
+from d_presentation.live_runtime import ReloadRefused, RuntimeSwitch, SettingsReloaded
+from d_presentation.web.scheduled_follows import follow_rankings_on_schedule
+from d_presentation.web.workflow_runs import WorkflowRuns
 
 pytestmark = pytest.mark.asyncio
 
@@ -225,19 +227,9 @@ async def test_a_login_shioaji_reports_down_answers_no_realtime_quote_until_a_ru
 async def test_the_web_apis_timer_logs_in_again_once_shioaji_reported_the_login_down(
     clients: list[FakeShioaji], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The timer's runtime loads the shipped settings files, in tmp_path so that no .env of the machine reaches them."""
-    monkeypatch.chdir(tmp_path)
+    """The timer of the scheduled follows makes the login again at its next look, before it looks for a follow."""
     monkeypatch.setenv("ACCOUNTS_KEY", KEY.get_secret_value())
-    config, shared, refreshed = shioaji_test_config(tmp_path, monkeypatch, SystemEnvironment.DEV), process(), asyncio.Event()
-
-    async def archive(pipeline: Pipeline) -> None:
-        return None
-
-    async def refresh(pipeline: Pipeline) -> None:
-        refreshed.set()
-
-    monkeypatch.setattr(Pipeline, "archive_daily_closes", archive)
-    monkeypatch.setattr(Pipeline, "refresh_daily_history", refresh)
+    config = shioaji_test_config(tmp_path, monkeypatch, SystemEnvironment.DEV)
     logger = RecordingLogger()
     shared = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
     switch = RuntimeSwitch(lambda _: open_runtime(config, shared), get_project_root(), logger)
@@ -245,8 +237,12 @@ async def test_the_web_apis_timer_logs_in_again_once_shioaji_reported_the_login_
 
     try:
         clients[0].session_down()
-        timer = asyncio.get_running_loop().create_task(collect_daily_data(switch))
-        await asyncio.wait_for(refreshed.wait(), 10)
+        timer = asyncio.get_running_loop().create_task(follow_rankings_on_schedule(switch, WorkflowRuns(logger)))
+
+        async with asyncio.timeout(10):
+            while len(switch.opened) < 2:
+                await asyncio.sleep(0.01)
+
         timer.cancel()
 
         with switch.hold() as current:

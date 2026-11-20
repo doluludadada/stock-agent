@@ -312,6 +312,13 @@
     "unit": null
   },
   {
+    "path": "ranking.top_up_tolerance_pct",
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": "percent"
+  },
+  {
     "path": "ranking.evidence_min_traded_value",
     "kind": "steps",
     "group": "ranking",
@@ -915,18 +922,25 @@
     "unit": null
   },
   {
-    "path": "trading.max_order_value",
+    "path": "trading.limit_offset_pct",
     "kind": "steps",
     "group": "trading_limits",
     "options": [],
-    "unit": "twd"
+    "unit": "percent"
   },
   {
-    "path": "trading.max_daily_buy_value",
+    "path": "trading.max_order_equity_pct",
     "kind": "steps",
     "group": "trading_limits",
     "options": [],
-    "unit": "twd"
+    "unit": "percent"
+  },
+  {
+    "path": "trading.max_daily_buy_equity_pct",
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "mock_trading.initial_cash",

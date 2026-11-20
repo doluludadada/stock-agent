@@ -46,6 +46,7 @@ def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1000) -> Or
         order_type=OrderType.LIMIT,
         quantity=quantity,
         limit_price=100,
+        price_at_signal=100,
         time_in_force=TimeInForce.IOC,
         created_at=NOW,
         updated_at=NOW,

@@ -25,7 +25,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Position
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
-from a_domain.types.enums import Role, ShioajiServer, SystemEnvironment, TradeAction, WatchlistType
+from a_domain.types.enums import OrderStatus, Role, ShioajiServer, SystemEnvironment, TradeAction, WatchlistType
 from b_application.config import settings_loader
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.live_runtime import open_runtime_switch
@@ -468,8 +468,8 @@ async def test_the_account_page_reads_the_mock_account_by_default_and_sinopac_wh
     assert (mock["execution_provider"], mock["current"]["cash"], mock["current"]["positions"]) == ("mock", harness.broker.cash, [])
     assert (sinopac["execution_provider"], sinopac["current"]["cash"], len(sinopac["current"]["positions"])) == ("shioaji", 42_000, 1)
     assert brokers == [
-        {"broker": "mock", "server": None, "max_order_value": None, "max_daily_buy_value": None},
-        {"broker": "shioaji", "server": "simulation", "max_order_value": 100_000.0, "max_daily_buy_value": 300_000.0},
+        {"broker": "mock", "server": None, "max_order_equity_pct": None, "max_daily_buy_equity_pct": None},
+        {"broker": "shioaji", "server": "simulation", "max_order_equity_pct": 0.25, "max_daily_buy_equity_pct": 1.1},
     ]
 
 
@@ -727,23 +727,32 @@ async def test_a_manual_buy_of_a_reported_stock_buys_the_shares_asked_at_a_fresh
     assert (mock["order"]["status"], sinopac["order"]["status"], unreported.status_code) == ("filled", "filled", 404)
 
 
-async def test_sinopac_buys_stop_at_the_order_limit_and_at_the_days_limit_while_the_mock_account_has_neither() -> None:
+async def test_sinopac_buys_stop_at_the_order_limit_and_at_the_days_limit_of_the_equity_while_the_mock_account_has_neither() -> None:
+    """
+    SinoPac's account is 1,000,000 of cash: a BUY may cost 25% of it, 250,000. After one of 200,000 and an earlier run's
+    900,000, 110% of what is left, 999,715 once the first BUY's fee is paid, is past for even one more share.
+    """
     harness = build_harness(sinopac=True)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
 
     async with serve(harness) as client:
         run_id = await reported_run(client)
-        too_big = await manual_buy(client, run_id, 1001, broker="shioaji")
-        filled = [await manual_buy(client, run_id, 1000, broker="shioaji") for _ in range(3)]
+        too_big = await manual_buy(client, run_id, 2501, broker="shioaji")
+        filled = await manual_buy(client, run_id, 2000, broker="shioaji")
+        earlier = next(order for order in harness.journal.orders.values() if order.status == OrderStatus.FILLED)
+        harness.journal.orders[uuid4()] = replace(earlier, id=uuid4(), decision_id=uuid4(), quantity=9000, filled_quantity=9000)
         past_the_day = await manual_buy(client, run_id, 1, broker="shioaji")
         on_mock = await manual_buy(client, run_id, 5000)
 
-    assert too_big["order"]["status"] == "rejected" and too_big["order"]["reason"].startswith("ORDER_VALUE_LIMIT: costs 100,100")
-    assert [bought["order"]["status"] for bought in filled] == ["filled"] * 3
-    assert past_the_day["order"]["status"] == "rejected" and past_the_day["order"]["reason"].startswith(
-        "DAILY_BUY_LIMIT: costs 100 after 300,000"
+    assert (too_big["order"]["status"], too_big["order"]["reason"]) == (
+        "rejected",
+        "ORDER_VALUE_LIMIT: costs 250,100 at its limit, above 250,000: trading.max_order_equity_pct 25% of the equity 1,000,000",
     )
-    assert [order.quantity for order in harness.real_broker.placed] == [1000, 1000, 1000]
+    assert filled["order"]["status"] == "filled"
+    assert past_the_day["order"]["status"] == "rejected" and past_the_day["order"]["reason"].startswith(
+        "DAILY_BUY_LIMIT: costs 100 after 1,100,000 of BUYs today, above 1,099,686: trading.max_daily_buy_equity_pct 110%"
+    )
+    assert [order.quantity for order in harness.real_broker.placed] == [2000]
     assert on_mock["order"]["status"] == "filled" and [order.quantity for order in harness.broker.placed] == [5000]
 
 

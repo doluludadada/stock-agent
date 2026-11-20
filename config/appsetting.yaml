@@ -78,8 +78,18 @@ ranking:
   # of revenue due before it (sources.mops.revenue_deadline_day), and holds the ranking from the next session's open.
   decision_day: 13
   # The formula the ranking, every stock's score, the backtest shown and a follow use now: one of the names below. The
-  # settings page switches it, and the switch applies at once.
-  active_formula: revenue_and_high
+  # settings page switches it, and the switch applies at once. After a switch an account's follows also buy each ranked
+  # stock it holds up to its equal weight, so a switch from 20 stocks to 10 does not leave half the account in cash. A
+  # follow that could not buy a top-up yet (on SinoPac a sale pays two sessions later) leaves the decision open, and
+  # the next session's follow buys it with the cash settled since; once one left nothing to trade, later follows leave
+  # a held stock as it is. The research of 2026-11-19 found 10 stocks earned more than 20 at a NT$100,000 start on
+  # both periods it tested, in part by paying the NT$20 fee floor half as often.
+  active_formula: revenue_and_high_top10
+  # How far under its equal weight, as a share of it, a ranked stock the account holds may be worth before a follow
+  # after a switch buys it up to the weight. Each BUY is sized at its limit, up to trading.limit_offset_pct above the
+  # price, so the mock account keeps about that much of each weight as cash; without this a follow would buy a few
+  # shares every session at the NT$20 fee floor. 0 to 1.
+  top_up_tolerance_pct: 0.1
   # The formulas the ranking can be made by. Each ranks its factors among its universe's stocks and holds the `top` best
   # sums of ranks in equal weights. Adding one is an entry here, of these factors:
   #   revenue_acceleration  the mean revenue of the latest short_months over that of the latest long_months
@@ -94,6 +104,17 @@ ranking:
   formulas:
     - name: revenue_and_high
       top: 20
+      min_close: 10
+      min_traded_value: 30000000
+      traded_value_sessions: 20
+      factors:
+        - kind: revenue_acceleration
+          short_months: 3
+          long_months: 12
+        - kind: nearness_to_high
+          high_sessions: 250
+    - name: revenue_and_high_top10
+      top: 10
       min_close: 10
       min_traded_value: 30000000
       traded_value_sessions: 20
@@ -378,13 +399,25 @@ trading:
   # default, or for an administrator on a personal site with a Shioaji login SinoPac, on its simulation server in dev
   # and test and on the real account in prod. A follow of a run orders on the mock account only. A follow of the
   # monthly ranking orders on the mock account or, for such an administrator, on SinoPac's simulation server, and is
-  # refused on the real account whatever these settings say. These two limits hold every SinoPac BUY, checked as it
-  # is sent; a SELL is never held to them and sells only shares the account holds.
-  # Most NT$ one SinoPac BUY may cost at its limit price, fees aside.
-  max_order_value: 100000
-  # Most NT$ the SinoPac BUYs of one Taiwan calendar day may cost together at their limit prices, counted from the
-  # trading journal, where each order is saved before it is sent.
-  max_daily_buy_value: 300000
+  # refused on the real account whatever these settings say.
+  # How far an order's limit price may lie past the price its decision saw, on every account: a BUY's at most this
+  # share above it, a SELL's at most this share below it, the furthest tick inside. The exchange fills such a limit at
+  # the market's price, so this bounds what a fill may cost; the mock account fills at the price the decision saw. The
+  # research of 2026-11-19 found a BUY limited 2% above the price fills on its first session 94-97% of the time and
+  # keeps 97% or more of the strategy's excess return, against 12-22% at the 8% of BUYs SinoPac's simulation filled at
+  # the price itself. BUYs are sized at the limit, fee included.
+  limit_offset_pct: 0.02
+  # These two limits hold every SinoPac BUY, checked as it is sent; a SELL is never held to them and sells only shares
+  # the account holds. Both follow the account: each run values it once before its first decision, its cash plus each
+  # holding at the run's price for it, and the limits are shares of that equity, so they grow and shrink with it.
+  # A follow of the ranking is planned inside them and keeps its best stocks first; another BUY past them is refused.
+  # Most one SinoPac BUY may cost at its limit price, fees aside, as a share of the equity. A follow of 10 stocks buys
+  # each at 10% of it, and a BUY sized on its risk budget (analysis.risk_per_trade_pct over stop_loss_pct) at 20%.
+  max_order_equity_pct: 0.25
+  # Most the SinoPac BUYs of one Taiwan calendar day may cost together at their limit prices, fees aside, as a share of
+  # the equity, counted from the trading journal, where each order is saved before it is sent. A follow that puts the
+  # whole account into the ranking spends at most its cash, 100% of the equity.
+  max_daily_buy_equity_pct: 1.1
 
 mock_trading:
   # Each user's mock account starts with this cash the first time it is read.
@@ -474,6 +507,13 @@ shioaji:
   # Seconds, at most 30, the broker may take to settle a cancel and the reads after it. Past them the order is recorded
   # unconfirmed, and SinoPac's record of the day settles it later. compose.yml's stop_grace_period covers it.
   cancel_timeout_seconds: 15
+  # The time of each market day, Taipei, from which a login made before it is stale: the site logs in again on a new
+  # client at its first use from then on, and the timer of the scheduled follows uses it within a minute. SinoPac does
+  # not say how long a login lasts; it refused one 26 hours old. After SinoPac's nightly maintenance and past 08:00,
+  # when a login reads the day's contracts and their price bands, before the opening auction takes orders at 08:30.
+  login_renewal_time: "08:15"
+  # Seconds, 10 to 3600, between two logins after one failed, so a SinoPac that does not answer is not asked at once.
+  login_retry_seconds: 60
   # The cash SinoPac's simulation account started with, all of it the owner has put in. That server reports no
   # balance, so the site figures the account's cash from this and SinoPac's records (SimulationCashRule): adding money
   # to the simulation account is raising this.

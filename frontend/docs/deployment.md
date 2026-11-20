@@ -245,7 +245,8 @@ set.
 
 A switch enables no order by itself. To let the site order on the real account, an administrator turns ordering on
 in the same panel, which asks for the password again. Each order then still needs an administrator who chooses
-SinoPac for that run, and stays within `trading.max_order_value` and `trading.max_daily_buy_value`. A ranking follow,
+SinoPac for that run, and stays within `trading.max_order_equity_pct` and `trading.max_daily_buy_equity_pct` of the
+account's equity. A ranking follow,
 by hand or by schedule, never orders on production. To go back, choose **Switch to simulation**: ordering turns off
 again. A run that started before a switch keeps the login of the server it started on, and its orders are refused
 while the settings name the other server. If the server is switched back while that run still goes on, its orders
@@ -486,6 +487,49 @@ row.
 PostgreSQL cannot remove a value from an enum type. To go back to the version before, restore the backup of step 2
 with `docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes`, then check
 out the old version and rebuild only the backend with `docker compose up -d --no-deps --build backend`.
+
+### Update to the marketable limits (schema version 16)
+
+From schema version 16 an order keeps the price its decision saw (`price_at_signal`), since its limit may lie up to
+`trading.limit_offset_pct` past it. The step adds the column and fills it from each order's decision, or from the
+order's limit where the decision's row is gone. The same version replaces the fixed NT$ limits on SinoPac BUYs,
+`trading.max_order_value` and `trading.max_daily_buy_value`, with shares of the account's equity,
+`trading.max_order_equity_pct` and `trading.max_daily_buy_equity_pct`. A `config/appsetting.yaml` that still sets the
+old limits starts with a notice that names them, so remove them. The shipped file makes `revenue_and_high_top10` the
+active formula and adds `ranking.top_up_tolerance_pct`, `shioaji.login_renewal_time` and
+`shioaji.login_retry_seconds`; a file without them takes their defaults.
+
+1. Get the new version and build the images. The site keeps running.
+
+   ```bash
+   git pull
+   docker compose build
+   ```
+
+2. Back up the database while the old backend still runs.
+
+   ```bash
+   docker compose exec backend python -m d_presentation.cli.database backup
+   ```
+
+3. Stop the backend and upgrade the database. The command dumps it first, then adds and fills the column in one
+   transaction, and prints `15 -> 16 add_the_price_an_order_was_decided_at`. A database at version 14 prints the step
+   of version 15 first.
+
+   ```bash
+   docker compose stop backend
+   docker compose run --rm backend python -m d_presentation.cli.database migrate
+   ```
+
+4. Start the site.
+
+   ```bash
+   docker compose up -d
+   ```
+
+To go back to the version before, restore the backup of step 2 with
+`docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes`, then check out the
+old version and rebuild only the backend with `docker compose up -d --no-deps --build backend`.
 
 ### Read the company background
 

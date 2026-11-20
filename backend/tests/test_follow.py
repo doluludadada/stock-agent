@@ -134,7 +134,7 @@ async def test_a_follow_buys_the_runs_decision_at_a_fresh_quote_and_names_the_ru
     [follow] = await stack.journal.signals_of(status.stats.run_id)
     account = await stack.broker.get_account()
     [(trade, source)] = await stack.journal.trades(ExecutionProvider.MOCK, account.opened_at, 10, 0)
-    assert (order.status, order.limit_price, order.filled_quantity) == (OrderStatus.FILLED, 100, 1000)
+    assert (order.status, order.limit_price, order.average_filled_price, order.filled_quantity) == (OrderStatus.FILLED, 102, 100, 1000)
     assert (follow.source, follow.price_at_signal, follow.followed_decision_id) == (
         SignalSource.FOLLOW,
         100,
@@ -216,7 +216,7 @@ async def test_on_the_public_site_a_follow_fills_at_the_last_sessions_official_c
     status = await followed(stack, run_id)
 
     [order] = status.orders
-    assert (order.status, order.limit_price, order.filled_quantity) == (OrderStatus.FILLED, 77, 1000)
+    assert (order.status, order.limit_price, order.average_filled_price, order.filled_quantity) == (OrderStatus.FILLED, 78.5, 77, 1000)
     assert not [error for error in status.stats.errors if "realtime" in error]
 
 

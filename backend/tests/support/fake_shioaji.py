@@ -20,7 +20,7 @@ from shioaji.constant import Action, ChangeType, Exchange, OrderState, Status, S
 from shioaji.contracts import Contract, Index, Stock
 from shioaji.data import Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
-from shioaji.position import AccountBalance, SettlementV1, StockPosition, StockProfitLoss
+from shioaji.position import AccountBalance, SettlementV1, StockPosition, StockProfitLoss, TradingLimits
 
 DONE = {Status.Filled, Status.Cancelled, Status.Failed, Status.Inactive}
 
@@ -99,7 +99,11 @@ def call_back(order_callback: Callable[[OrderState, dict], None] | None, state: 
         caller.join()
 
 
-def stock(code: str, reference: float = 100.0) -> Stock:
+def stock(code: str, reference: float = 100.0, updated_on: datetime.date | None = None) -> Stock:
+    """
+    A stock's contract, its price band 10% each side of `reference`, as of `updated_on` (update_date, YYYY/MM/DD as the
+    SDK's contracts of 2026-11-13 hold it). Unset, the contract names no day, as one the adapter takes for an older band.
+    """
     return Stock(
         exchange=Exchange.TSE,
         code=code,
@@ -109,6 +113,7 @@ def stock(code: str, reference: float = 100.0) -> Stock:
         reference=reference,
         limit_up=round(reference * 1.1, 2),
         limit_down=round(reference * 0.9, 2),
+        update_date=f"{updated_on:%Y/%m/%d}" if updated_on is not None else "",
     )
 
 
@@ -239,6 +244,11 @@ class FakeShioaji:
     balance: AccountBalance = field(default_factory=lambda: AccountBalance(acc_balance=1_000_000.0, date="2026-10-19", errmsg=""))
     settlement_amounts: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Settlement amounts due on T, T+1 and T+2; negative is a payment."""
+    trading_available: int = 0
+    """
+    What trading_limits answers the stock account may still buy today. 0, every figure 0, is what the simulation server
+    answered on 2026-11-19; a production login answers its limit.
+    """
     holdings: list[StockPosition] = field(default_factory=list)
     profit_losses: list[StockProfitLoss] = field(default_factory=list)
     """The sales the broker settled, each with its date: list_profit_loss answers those within the dates asked."""
@@ -451,6 +461,12 @@ class FakeShioaji:
         self.bank_reads.append("account_balance")
         return self.balance.model_copy(update={"acc_balance": 0.0}) if self.simulation else self.balance
 
+    def trading_limits(self, account: Account = None, timeout: int = 5000, cb=None) -> TradingLimits:
+        self._fail_if_told("trading_limits")
+        self.bank_reads.append("trading_limits")
+        limit = self.trading_available
+        return TradingLimits(trading_limit=limit, trading_used=0, trading_available=limit)
+
     def settlements(self, account: Account = None, timeout: int = 5000, cb=None) -> list[SettlementV1]:
         self._fail_if_told("settlements")
         self.bank_reads.append("settlements")
@@ -495,3 +511,21 @@ class FakeShioaji:
     def _fail_if_told(self, method: str) -> None:
         if method in self.refusals and (self.placed or not self.refuses_once_placed):
             raise self.refusals[method]
+
+
+def same_account(earlier: FakeShioaji) -> FakeShioaji:
+    """
+    The client of a new login on `earlier`'s account. SinoPac keeps the day's orders by account: a new login's
+    update_status(account) and list_trades find the orders an earlier client sent and refresh them, and its
+    cancel_order cancels them, as the code already relies on after a restart. So the new client shares that record with
+    `earlier`, and its contracts and quotes.
+    """
+    return FakeShioaji(
+        earlier.simulation,
+        Contracts=earlier.Contracts,
+        snapshot_answers=earlier.snapshot_answers,
+        placed=earlier.placed,
+        _queued=earlier._queued,
+        _matched=earlier._matched,
+        _unlisted=earlier._unlisted,
+    )

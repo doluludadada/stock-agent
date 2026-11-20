@@ -243,7 +243,7 @@ async def test_every_save_needs_the_password_in_the_same_request_and_a_wrong_one
 
 @pytest.mark.parametrize(
     ("path", "value"),
-    [("market.board_lot_shares", 1), ("accounts.settings_password_failures", 1000), ("trading.max_daily_buy_value", 30_000_000)],
+    [("market.board_lot_shares", 1), ("accounts.settings_password_failures", 1000), ("trading.max_daily_buy_equity_pct", 3.0)],
     ids=["board-lot", "password-limit", "daily-buy-limit"],
 )
 async def test_a_stolen_session_alone_changes_no_setting(project: Path, path: str, value: Any) -> None:
@@ -328,7 +328,7 @@ async def test_each_refusal_says_which_it_is_by_a_stable_code(project: Path) -> 
     async with serve(harness) as client:
         required = await save(client, ("ai.temperature", 0.6), password=None)
         refused = await save(client, ("ai.temperature", 0.6), password="not the password")
-        problems = await save(client, ("trading.max_order_value", 0))
+        problems = await save(client, ("trading.max_order_equity_pct", 0))
         edit = await save(client, ("trading.order_mode", "live"))
         invalid = await client.put(SETTINGS, json={"confirm": True})
 
@@ -352,15 +352,15 @@ async def test_wrong_passwords_have_their_own_limit_and_never_lock_the_sign_in(p
     limit = harness.config.accounts.settings_password_failures
 
     async with serve(harness) as client:
-        wrong = [(await save(client, ("trading.max_order_value", 90000), password="guess")).status_code for _ in range(limit + 1)]
-        throttled = await save(client, ("trading.max_order_value", 90000))
+        wrong = [(await save(client, ("trading.max_order_equity_pct", 0.2), password="guess")).status_code for _ in range(limit + 1)]
+        throttled = await save(client, ("trading.max_order_equity_pct", 0.2))
         signed_in = await client.post(
             "/v1/auth/sign-in", json={"identifier": ADMINISTRATOR.username, "password": ADMINISTRATOR_PASSWORD}
         )
 
     assert wrong == [403] * limit + [429] and throttled.status_code == 429 and "Retry-After" in throttled.headers
     assert throttled.json()["code"] == "sign_in_throttled" and signed_in.status_code == 200
-    assert "max_order_value: 100000" in text_of(project)
+    assert "max_order_equity_pct: 0.25" in text_of(project)
 
 
 @pytest.mark.parametrize(
@@ -428,7 +428,7 @@ def alias_bomb(levels: int, width: int) -> str:
     ("text", "message", "line", "column"),
     [
         (alias_bomb(4, 10), "YAML anchors and aliases are not allowed in a settings file", 1, 5),
-        ("trading:\n  max_order_value: [100000\n", None, 3, 1),
+        ("trading:\n  max_order_equity_pct: [0.25\n", None, 3, 1),
     ],
     ids=["alias-bomb", "does-not-parse"],
 )
@@ -583,17 +583,17 @@ async def test_a_file_another_editor_saves_while_the_new_settings_open_is_a_conf
 async def test_a_saved_sinopac_limit_holds_the_runs_that_start_after_it(project: Path) -> None:
     async with app_of(admin_harness(project)) as app, client_at(app) as client:
         assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
-        saved = await save(client, ("trading.max_order_value", 50000))
+        saved = await save(client, ("trading.max_order_equity_pct", 0.2))
         brokers = (await client.get("/v1/account/brokers")).json()
 
         with app.state.runtime_switch.hold() as current:
             limits = current.runtime.config.broker_access_rule().limit_rule
 
-    assert values_of(saved)["trading.max_order_value"] == 50000
-    assert (limits.max_order_value, limits.max_daily_buy_value) == (50_000, 300_000)
+    assert values_of(saved)["trading.max_order_equity_pct"] == 0.2
+    assert (limits.max_order_equity_pct, limits.max_daily_buy_equity_pct) == (0.2, 1.1)
     assert [broker["broker"] for broker in brokers] == ["mock"]
     entry = json.loads((project / ".settings-admin" / "audit.jsonl").read_text(encoding="utf-8"))
-    assert entry["settings"] == ["trading.max_order_value"]
+    assert entry["settings"] == ["trading.max_order_equity_pct"]
 
 
 @pytest.fixture
@@ -899,6 +899,7 @@ def awaiting_settlement(harness: CliHarness) -> None:
         order_type=OrderType.LIMIT,
         quantity=1000,
         limit_price=100.0,
+        price_at_signal=100.0,
         time_in_force=TimeInForce.IOC,
         created_at=MARKET_OPEN,
         updated_at=MARKET_OPEN,

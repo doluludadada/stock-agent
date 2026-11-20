@@ -138,13 +138,16 @@ async def run_menu(switch: RuntimeSwitch, user: User) -> None:
     setup the menu shows (the brokers, a real broker's server and limits) is the one the chosen option runs on, and an
     edit made during an option waits for the next round. An option that may send an order looks at the files once
     more after the choice: settings that changed while the menu waited, a Web save included, print the menu again on
-    them instead. The user is read again before each option; menu 8's strategy carries over to the next round while
-    the settings still have it.
+    them instead. A Shioaji login that is due is made again before the menu prints (RuntimeSwitch.log_in_again), and
+    for an option that may send an order once more after the choice: a login made again while the menu waited prints
+    the menu again on it, so the option runs on the new login. The user is read again before each option; menu 8's
+    strategy carries over to the next round while the settings still have it.
     """
     built_in_strategy_id: str | None = None
 
     while True:
         print_reload(await switch.reload())
+        await switch.log_in_again()
 
         with switch.hold() as opened:
             runtime = opened.runtime
@@ -157,6 +160,10 @@ async def run_menu(switch: RuntimeSwitch, user: User) -> None:
 
             if MENU[choice].may_submit_orders and await reloaded(switch):
                 terminal.console.print("[yellow]The settings changed while the menu waited. Choose again on them.[/yellow]")
+                continue
+
+            if MENU[choice].may_submit_orders and await switch.log_in_again():
+                terminal.console.print("[yellow]Shioaji was logged in to again while the menu waited. Choose again.[/yellow]")
                 continue
 
             await run_menu_option(choice, runtime, session)
@@ -312,8 +319,8 @@ def print_trading_setup(runtime: Runtime, session: terminal.CliSession) -> None:
     real = ", ".join(broker.label for broker in runtime.brokers_for(session.user) if broker.real)
     shioaji = config.shioaji.server
     server = shioaji.label if shioaji.simulation else f"{shioaji.label.upper()}, REAL MONEY"
-    order_limit, daily_limit = config.trading.max_order_value, config.trading.max_daily_buy_value
-    limits = f"each BUY at most {order_limit:,.0f} NT$, at most {daily_limit:,.0f} NT$ of BUYs a day"
+    order_limit, daily_limit = config.trading.max_order_equity_pct, config.trading.max_daily_buy_equity_pct
+    limits = f"each BUY at most {order_limit:.0%} of the account's equity, at most {daily_limit:.0%} of it in BUYs a day"
 
     terminal.console.print(f"Environment:        {terminal.format_label(config.environment.value)}")
 

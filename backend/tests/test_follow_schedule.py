@@ -432,7 +432,12 @@ async def test_after_a_switch_of_the_active_formula_the_schedule_brings_the_acco
     assert saved.status_code == 200, saved.text
     assert that_day == ([], ("2026-10-13", None, None))
     assert (run.ranking_formula, run.ranking_open) == (ONE, 0)
-    assert placed(harness) == [("2330", TradeAction.BUY), ("2317", TradeAction.BUY), ("2317", TradeAction.SELL)]
+    assert placed(harness) == [
+        ("2330", TradeAction.BUY),
+        ("2317", TradeAction.BUY),
+        ("2317", TradeAction.SELL),
+        ("2330", TradeAction.BUY),
+    ], "the first follow under the formula of one stock tops 2330 up to the whole account"
     assert after == ([], (None, None, None))
 
 

@@ -339,8 +339,8 @@ each order `BrokerAccessRule` checks again that the order reaches the broker the
 `features.sinopac_ordering`, as the settings file on disk holds it at that moment and not as the run's settings held it
 at its start, lets the user order there (`RealBrokerOrdererRule`, `ORDERING_OFF` otherwise), that the
 user is still an active administrator, that the login is up on the server `shioaji.server` names on disk at that
-moment (`BrokerLoginRule`, `BROKER_SERVER_MISMATCH` otherwise), and `BuyLimitRule` holds every SinoPac BUY to `trading.max_order_value` and the day's to
-`trading.max_daily_buy_value`. `GET /v1/account/brokers` answers what each start's confirmation names.
+moment (`BrokerLoginRule`, `BROKER_SERVER_MISMATCH` otherwise), and `BuyLimitRule` holds every SinoPac BUY to `trading.max_order_equity_pct` of the account's equity as the
+run valued it and the day's to `trading.max_daily_buy_equity_pct` of it. `GET /v1/account/brokers` answers what each start's confirmation names.
 
 `POST /v1/runs/{id}/follow` follows a finished Full Cycle into the user's mock account, the only account it orders on, as a
 run of its own (`Workflow.FOLLOW`) through the same order loop. `Audience.order_pricing` decides the price: a fresh
@@ -358,7 +358,17 @@ accounts the site offers the user as one now and why it refuses theirs (`account
 account the user confirmed, and one that is no longer the saved account answers 409 `follow_account_changed`. It sells each holding the ranking left, then buys each ranked stock the account lacks: the account's value over
 the ranking's stocks, capped by its share of the cash the sales free, in whole lots of `analysis.lot_size`
 (`RankingFollowRule`). A ranked stock already held is left as it is, so a second follow of the same decision answers
-409 `nothing_to_follow`, and a stock whose order was refused stays open to the next follow. A ranking that ranks no
+409 `nothing_to_follow`, and a stock whose order was refused stays open to the next follow. The one exception is the
+follows after a switch of `ranking.active_formula`, while the account's last follow that left it nothing to trade
+used another formula (`TopUpRule`): each also buys every ranked stock the account holds up to its equal weight where it
+is worth less by more than `ranking.top_up_tolerance_pct` (10%) of that weight, inside the same bounds and best first,
+so a switch from 20 stocks to 10 does not leave half the account in cash. Such a follow is something to follow also
+for an account that holds the new ranking alone. A top-up it did not buy counts as left to trade, so the decision stays
+pending and the schedule tries again on the next session, still a follow after the switch. On SinoPac, which pays a
+sale at settlement, the first of them tops up with the cash the account has before its sales settle, and the next
+with the cash settled since. Once one left nothing to trade, every later follow tops up nothing. The tolerance keeps
+the mock account, which keeps about `trading.limit_offset_pct` of each BUY as cash, from buying a few shares at the
+minimum fee every session. A ranking that ranks no
 stock sells nothing. `GET /v1/rankings/follow` answers which account it is for (`account`), what that account holds
 and lacks of the ranking, the holdings that left it, why a follow may not start there now (`refusal`), whether a run of
 the user runs now, and the mock account's return since its first ranking follow against `ranking.benchmark_id` over the
@@ -376,8 +386,9 @@ unless the Shioaji login that answers is on SinoPac's simulation server, when th
 is read (403 `not_simulation`), at each order's preparation and right before each exchange order (`NOT_SIMULATION`),
 and no setting lifts it. It needs an active administrator whom `features.sinopac_ordering` shows ordering and the
 login up; `GET /v1/rankings/follow` reads its positions in one request, and only while the site lets the user follow
-there. Each BUY is sized inside `trading.max_order_value`; one past `trading.max_daily_buy_value` is refused,
-recorded and left to a later follow. A user's schedule (`PUT /v1/rankings/follow/schedule`, `time` alone) follows on
+there. Each BUY is sized inside `trading.max_order_equity_pct` of the account's equity, and the BUYs are kept best
+first inside what `trading.max_daily_buy_equity_pct` leaves of the day and SinoPac's own trading limit where it answers
+one; the rest is logged in the run and left to a later follow. A user's schedule (`PUT /v1/rankings/follow/schedule`, `time` alone) follows on
 the follow account, and saving either never changes the other. A decision is finished on the account its follow ran
 on, and a user the site does not let follow on their account now is refused there, by the button (403
 `real_broker_refused`, `feature_hidden`, `broker_unavailable` or `not_simulation`) and by the schedule (the timer logs

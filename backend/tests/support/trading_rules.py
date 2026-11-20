@@ -13,7 +13,8 @@ from support.settings import shipped_config
 COSTS = TradingCostRule(
     fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
 )
-LIMIT_PRICE = shipped_config().market.limit_price_rule()
+LIMIT_PRICE = shipped_config().market.limit_price_rule(offset=0.0)
+"""No offset: these rules limit each BUY at its decided price as a tick, so a test's numbers are the sizing's alone."""
 SUMMARY = AnalysisSummaryRule(item_limit=3)
 ENTRY_REASON = EntryReasonRule(item_limit=3, summary_rule=SUMMARY)
 EXIT_REASON = ExitReasonRule(item_limit=3, summary_rule=SUMMARY)

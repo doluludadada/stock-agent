@@ -52,19 +52,21 @@ async def test_an_order_row_traces_back_to_its_price_reports_signal_run_and_resu
     assert AiAnalysisReport(**signal_row.ai_report) == stock.ai_report
     assert (signal_row.action, signal_row.source, signal_row.run_id) == (TradeAction.BUY, SignalSource.MANUAL, order_row.run_id)
     assert (run_row.workflow, run_row.execution_provider, run_row.end_time is not None) == (Workflow.MANUAL_BUY, "mock", True)
+    # Sized at its limit, 102, 2% above the quote: 2% of 1,000,000 over the 10.2 NT$ stop is 1960 shares, filled at 100.
     assert (order_row.status, order_row.filled_quantity, order_row.limit_price, order_row.fee, order_row.tax) == (
         OrderStatus.FILLED,
-        2000,
-        100,
-        285,
+        1960,
+        102,
+        279,
         0,
     )
-    assert snapshot_row.cash == 1_000_000 - 200_285
+    assert (order_row.price_at_signal, order_row.average_filled_price) == (quote.close, quote.close)
+    assert snapshot_row.cash == 1_000_000 - 196_279
     assert snapshot_row.positions == [
         {
             "stock_id": "2330",
-            "quantity": 2000,
-            "average_cost": 100.1425,
+            "quantity": 1960,
+            "average_cost": 196_279 / 1960,
             "mark_price": 100.0,
             "marked_at": MONDAY_10_00.isoformat(),
             "unrealized_pnl": 0.0,
@@ -78,7 +80,7 @@ async def test_a_filled_manual_buy_returns_the_filled_order(tmp_path) -> None:
     result = (await stack.pipeline.buy_manually(analysed_stock())).require_manual_buy_order()
 
     assert isinstance(result, Order)
-    assert (result.status, result.filled_quantity, result.fee) == (OrderStatus.FILLED, 2000, 285)
+    assert (result.status, result.filled_quantity, result.fee) == (OrderStatus.FILLED, 1960, 279)
 
 
 @pytest.mark.parametrize(("setup", "reason"), [("market_closed", "MARKET_CLOSED"), ("stale_price", "STALE_PRICE")])
@@ -155,8 +157,9 @@ async def test_a_manual_buy_risks_a_share_of_the_equity_with_an_unpriced_positio
 
     [order] = (await stack.pipeline.buy_manually(analysed_stock())).orders
 
-    # The run has no price for 2603, so equity is 1,000,000 + 1000 x 50; 2% of it over the 10 NT$ stop is 2100 shares.
-    assert (order.status, order.quantity) == (OrderStatus.FILLED, 2100)
+    # The run has no price for 2603, so equity is 1,000,000 + 1000 x 50; 2% of it over the 10.2 NT$ stop of the BUY's
+    # limit, 102, is 2058 shares.
+    assert (order.status, order.quantity) == (OrderStatus.FILLED, 2058)
 
 
 async def test_intraday_fixes_the_equity_before_its_stop_loss_sale_pays_fee_and_tax(tmp_path) -> None:
@@ -173,12 +176,12 @@ async def test_intraday_fixes_the_equity_before_its_stop_loss_sale_pays_fee_and_
     status = await stack.pipeline.run_intraday()
 
     # Equity is 1,000,000 + 1000 x 85 = 1,085,000 before the stop-loss sale, whose fee 121 and tax 255 leave 1,084,624 cash.
-    # 2% of the equity over the 10 NT$ stop is 2170 shares; 2% of that cash would be 2169.
+    # 2% of the equity over the 10.2 NT$ stop of the BUY's limit, 102, is 2127 shares; 2% of that cash would be 2126.
     assert [(order.stock_id, order.action, order.status, order.quantity) for order in status.orders] == [
         ("2330", TradeAction.SELL, OrderStatus.FILLED, 1000),
-        ("2317", TradeAction.BUY, OrderStatus.FILLED, 2170),
+        ("2317", TradeAction.BUY, OrderStatus.FILLED, 2127),
     ]
-    assert (await stack.broker.get_account()).cash == 1_084_624 - 217_000 - 309
+    assert (await stack.broker.get_account()).cash == 1_084_624 - 212_700 - 303
 
 
 class UnwritableSignals(TradingJournal):
@@ -230,10 +233,10 @@ async def test_a_broker_answer_that_cannot_be_recorded_is_a_run_error_and_the_fi
     status = await stack.pipeline.buy_manually(analysed_stock())
 
     [order] = status.orders
-    assert (order.status, order.filled_quantity) == (OrderStatus.FILLED, 2000)
+    assert (order.status, order.filled_quantity) == (OrderStatus.FILLED, 1960)
     assert status.stats.errors == [f"Order {order.id} ended filled but its record still says PENDING: disk full"]
     assert await recorded_orders(stack) == [(OrderStatus.PENDING, 0, None)]
-    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
+    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [1960]
 
 
 async def test_a_stop_loss_sale_gets_one_order_although_intraday_sends_its_orders_twice(tmp_path) -> None:
@@ -294,7 +297,7 @@ async def test_order_execution_sends_only_a_pending_order(tmp_path, ending: str 
     result = await execution.execute(order, stats)
 
     assert (broker.asked, result.status) == (asked, status)
-    assert [position.quantity for position in (await stack.broker.get_account()).positions] == ([2000] if asked else [])
+    assert [position.quantity for position in (await stack.broker.get_account()).positions] == ([1960] if asked else [])
 
 
 class BrokerThatChecksTheRecord:
@@ -410,8 +413,8 @@ async def test_a_cancel_during_the_broker_call_lets_the_call_finish_and_records_
 
     await cancel_during_the_broker_call(stack, cancels=1)
 
-    assert await recorded_orders(stack) == [(OrderStatus.FILLED, 2000, None)]
-    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
+    assert await recorded_orders(stack) == [(OrderStatus.FILLED, 1960, None)]
+    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [1960]
 
 
 async def test_a_cancel_before_the_broker_asks_whether_it_may_send_sends_nothing_and_records_the_order_rejected(tmp_path) -> None:

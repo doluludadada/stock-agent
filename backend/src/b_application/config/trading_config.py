@@ -131,8 +131,20 @@ class RankingConfig(BaseModel):
 
     active_formula: FormulaId = Field(json_schema_extra={"names_of": "ranking.formulas"})
     """
-    The formula the ranking, every stock's score, the backtest shown and a follow use now. `names_of` marks a setting
-    that chooses among the names of the entries the settings file sets at that path.
+    The formula the ranking, every stock's score, the backtest shown and a follow use now. After a switch an account's
+    follows also buy each ranked stock it holds up to its equal weight (top_up_tolerance_pct), until one of them left
+    the account nothing to trade; every later one leaves a held stock as it is (RankingFollowRule). `names_of` marks a
+    setting that chooses among the names of the entries the settings file sets at that path.
+    """
+
+    top_up_tolerance_pct: float = Field(
+        default=0.10, ge=0, le=1, json_schema_extra={"steps": [0.05, 0.1, 0.2], "unit": SettingUnit.PERCENT}
+    )
+    """
+    How far below its equal weight a ranked stock the account holds may be worth, as a share of that weight, before a
+    follow after a switch of active_formula buys it up to the weight (TopUpRule). A follow sizes each BUY at its limit,
+    up to trading.limit_offset_pct above the price it fills at, so the mock account keeps about that share of each
+    weight as cash: without the tolerance every session's follow would buy a few more shares at the minimum fee.
     """
 
     evidence_min_traded_value: float = Field(
@@ -254,37 +266,59 @@ class MarketConfig(BaseModel):
     def account_value_rule(self) -> AccountValueRule:
         return AccountValueRule(position_value_rule=self.position_value_rule())
 
-    def limit_price_rule(self) -> LimitPriceRule:
+    def limit_price_rule(self, offset: float) -> LimitPriceRule:
+        """The limits of orders at most `offset` past their decided price; with 0, the decided price as a tick."""
         tick_size_rule = TickSizeRule(
             stock_ticks=tuple(sorted(self.stock_ticks.items(), reverse=True)),
             etf_ticks=tuple(sorted(self.etf_ticks.items(), reverse=True)),
         )
 
-        return LimitPriceRule(tick_size_rule=tick_size_rule, float_tolerance=self.tick_float_tolerance)
+        return LimitPriceRule(tick_size_rule=tick_size_rule, float_tolerance=self.tick_float_tolerance, offset=Decimal(repr(offset)))
 
 
 class TradingConfig(BaseModel):
     """
-    The limits of every BUY on a real broker (ExecutionProvider.real). Which broker a run orders on is the run's own
-    choice when it starts, the mock account by default. Every value comes from the `trading` section of
-    config/appsetting.yaml.
+    How far an order's limit may lie past the price its decision saw, on every broker, and the limits of every BUY on a
+    real broker (ExecutionProvider.real), which follow the account's equity as each run values it. Which broker a run
+    orders on is the run's own choice when it starts, the mock account by default. Every value comes from the `trading`
+    section of config/appsetting.yaml; a file without one runs on the defaults. `retired` names the fixed NT$ limits the
+    section once had, which these multiples replaced.
     """
 
-    model_config = ConfigDict(use_attribute_docstrings=True)
+    model_config = ConfigDict(use_attribute_docstrings=True, json_schema_extra={"retired": ["max_order_value", "max_daily_buy_value"]})
 
-    max_order_value: float = Field(
-        gt=0,
-        allow_inf_nan=False,
-        json_schema_extra={"steps": [10000, 20000, 50000, 100000, 200000, 500000, 1000000], "unit": SettingUnit.TWD},
+    limit_offset_pct: float = Field(
+        default=0.02, ge=0, le=0.05, json_schema_extra={"steps": [0, 0.005, 0.01, 0.02, 0.03, 0.05], "unit": SettingUnit.PERCENT}
     )
-    """Most NT$ one BUY on a real broker may cost at its limit price, fees aside."""
+    """
+    How far an order's limit price may lie past the price its decision saw: a BUY's at most this share above it and a
+    SELL's at most this share below it, the furthest tick inside (LimitPriceRule). The exchange fills such a limit at
+    the market's price, so this bounds what a fill may cost, and the mock account fills at the price the decision saw.
+    BUYs are sized at the limit, fee included, so they stay affordable whatever the fill. 0 limits each order at the
+    price its decision saw.
+    """
 
-    max_daily_buy_value: float = Field(
-        gt=0,
-        allow_inf_nan=False,
-        json_schema_extra={"steps": [50000, 100000, 300000, 500000, 1000000, 3000000], "unit": SettingUnit.TWD},
+    max_order_equity_pct: float = Field(
+        default=0.25, gt=0, le=1, json_schema_extra={"steps": [0.1, 0.15, 0.2, 0.25, 0.3, 0.5], "unit": SettingUnit.PERCENT}
     )
-    """Most NT$ the BUYs on a real broker of one Taiwan calendar day may cost together at their limit prices."""
+    """
+    Most one BUY on a real broker may cost at its limit price, fees aside, as a share of the account's equity as the run
+    valued it (BuyLimitRule). A ranking follow of 10 stocks buys each at 10% of it and a BUY sized on its risk budget
+    takes analysis.risk_per_trade_pct over analysis.stop_loss_pct of it, 20%, so 25% stops a BUY far larger than either
+    and neither. A follow is sized inside it.
+    """
+
+    max_daily_buy_equity_pct: float = Field(
+        default=1.1, gt=0, le=3, json_schema_extra={"steps": [0.5, 1, 1.1, 1.5, 2], "unit": SettingUnit.PERCENT}
+    )
+    """
+    Most the BUYs on a real broker of one Taiwan calendar day may cost together at their limit prices, fees aside, as a
+    share of the account's equity as each run valued it, counted from the trading journal (BuyLimitRule). A follow that
+    puts the whole account into the ranking spends no more than its cash, so 100% is the most a normal day buys and the
+    rest is room for a manual BUY, a BUY of unknown outcome counted in full and a market that fell between two runs of
+    the day; a run that keeps buying is stopped there. A follow keeps its best stocks within it and leaves the rest to a
+    later session.
+    """
 
 
 class HoldingsConfig(BaseModel):
@@ -409,6 +443,22 @@ class ShioajiConfig(BaseSettings):
     recorded UNCONFIRMED, which the broker's record of the day settles later (OrderSettlement). compose.yml's
     stop_grace_period covers it.
     """
+
+    login_renewal_time: time = Field(default=time(8, 15), json_schema_extra={"operator_only": True})
+    """
+    The time of each market day, in Taipei, from which a login made before it is stale: the first use of the site's
+    login at or after it logs in again on a new client (RuntimeSwitch.log_in_again), and the Web API's timer of the
+    scheduled follows makes that use within api.follow_schedule_poll_seconds of it. SinoPac does not say how long a
+    login lasts: on 2026-11-20 it refused one made 26 hours earlier (TokenError), and one 6.5 hours old still answered.
+    The time is after SinoPac's nightly maintenance, before the opening auction takes orders (08:30), and a quarter of
+    an hour past 08:00, midnight UTC, when the SDK's cache of the contracts, kept by UTC day, turns a day old, so a login
+    then reads the day's contracts and the price band each order is kept within.
+    """
+
+    login_retry_seconds: float = Field(
+        default=60, ge=10, le=3600, allow_inf_nan=False, json_schema_extra={"operator_only": True, "unit": SettingUnit.SECONDS}
+    )
+    """The least time between two logins after one failed, so a SinoPac that does not answer is not asked again at once."""
 
     simulation_initial_cash: float = Field(
         default=1_000_000,

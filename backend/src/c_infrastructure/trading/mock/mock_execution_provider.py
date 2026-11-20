@@ -31,10 +31,11 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     so it has no order state of its own to keep. connect seeds the book, and every account read
     calls it, so the book is seeded on first use.
 
-    Fill model: there is no market feed. The limit price is taken as the market price
-    (OrderRule prices orders from a fresh quote), and the simulated market fills at most
-    `mock_trading.max_fill_quantity` shares per order at that price (unset: any quantity).
-    Fees, tax and realized PnL come from FillRule.
+    Fill model: there is no market feed. The market's price is the price the order's decision saw
+    (Order.price_at_signal, a fresh quote or the official close) as an exchange tick, never the limit: a limit lies
+    up to trading.limit_offset_pct past that price, and like the exchange the simulated market fills a marketable
+    limit at the market's price. It fills at most `mock_trading.max_fill_quantity` shares per order at that price
+    (unset: any quantity). Fees, tax and realized PnL come from FillRule.
 
     Before acceptance (REJECTED): what OrderAcceptanceRule refuses, which is a MARKET order, ROD, a BUY
     without cash for the whole quantity plus fee, and a SELL of shares the account does not hold.
@@ -55,6 +56,8 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         self._cost_rule = config.market.cost_rule()
         self._fill_rule = FillRule(cost_rule=self._cost_rule)
         self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
+        # With no offset the limit rule gives the decided price as a tick: what a trade at that price executes at.
+        self._market_price_rule = config.market.limit_price_rule(offset=0.0)
 
     @override
     async def connect(self) -> None:
@@ -122,6 +125,11 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         return order
 
     @override
+    async def trading_available(self) -> float | None:
+        """The mock account has no trading limit of its own."""
+        return None
+
+    @override
     async def open_positions(self) -> list[Position]:
         return (await self.get_account()).positions
 
@@ -144,10 +152,11 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     async def fill(self, order: Order, account: Account, now: datetime) -> None:
         available = order.quantity if self._max_fill_quantity is None else min(order.quantity, self._max_fill_quantity)
         quantity = 0 if order.time_in_force == TimeInForce.FOK and available < order.quantity else available
-        price = order.limit_price
 
-        if quantity == 0 or price is None:
+        if quantity == 0:
             return
+
+        price = self._market_price_rule.apply(order.action, order.stock_id, order.price_at_signal)
 
         cost, realized_pnl = self._fill_rule.apply(order, quantity, price, account.position_for(order.stock_id), now=now)
 

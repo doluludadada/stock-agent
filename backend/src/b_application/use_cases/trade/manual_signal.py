@@ -15,9 +15,9 @@ class ManualSignal:
     """
     Use Case: Decides and records the user's confirmed BUY of one analysed stock with ManualEntryRule, which skips the
     buy threshold: the shares the user asked for, or with None as many as sizing on the run's equity allows (the
-    account's cash plus each position at the run's latest price for it, AccountValueRule). It returns the recorded
-    decision and, when no order may follow, why: the analysis has no composite score, there is no price, the decision
-    cannot be recorded, or it sizes to no share.
+    account's cash plus each position at the run's latest price for it, AccountValueRule). It returns that equity, which
+    the run's BUY limits follow, the recorded decision and, when no order may follow, why: the analysis has no
+    composite score, there is no price, the decision cannot be recorded, or it sizes to no share.
     """
 
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
@@ -29,7 +29,8 @@ class ManualSignal:
 
     async def execute(
         self, stock: Stock, quantity: int | None, account: Account, stocks: Mapping[str, Stock], stats: SystemStats
-    ) -> tuple[list[TradeSignal], str | None]:
+    ) -> tuple[float, list[TradeSignal], str | None]:
+        equity = self._value_rule.apply(account, stocks.values()).equity
         refusal = None
 
         if stock.composite_score is None:
@@ -39,9 +40,8 @@ class ManualSignal:
 
         if refusal is not None:
             self._logger.warning(f"Manual BUY {stock.stock_id} not placed: {refusal}")
-            return [], refusal
+            return equity, [], refusal
 
-        equity = self._value_rule.apply(account, stocks.values()).equity
         signal = self._entry_rule.apply(stock, account, quantity, equity=equity, now=self._market_clock.now())
 
         try:
@@ -50,10 +50,10 @@ class ManualSignal:
             stats.add_error(f"Manual BUY decision not saved: {error}")
             refusal = f"the decision could not be recorded, so no order was sent: {error}"
             self._logger.warning(f"Manual BUY {stock.stock_id} not placed: {refusal}")
-            return [], refusal
+            return equity, [], refusal
 
         stats.signals_generated += 1
         refusal = signal.reason if signal.action == TradeAction.HOLD else None
         self._logger.info(f"Manual BUY {stock.stock_id} decided: {signal.action.value}, equity {equity:,.0f}, refusal {refusal}.")
 
-        return [signal], refusal
+        return equity, [signal], refusal

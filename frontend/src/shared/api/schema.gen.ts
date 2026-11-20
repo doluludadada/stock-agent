@@ -1020,8 +1020,9 @@ export interface paths {
          *     in whole lots of analysis.lot_size, priced as this site prices an order now, through the same order gates and
          *     journal as every order. While the formula holds cash it sells every holding and buys nothing. A second follow of a
          *     decision the account already holds answers nothing_to_follow. On SinoPac it follows into the simulation account,
-         *     each BUY sized inside trading.max_order_value and refused past trading.max_daily_buy_value. SinoPac pays a sale at
-         *     settlement, so there a follow buys only what the cash the account has now pays for whole, best first, and the
+         *     its BUYs planned inside the BUY limits that follow the account's equity (trading.max_order_equity_pct,
+         *     trading.max_daily_buy_equity_pct) and SinoPac's own trading limit where it says one. SinoPac pays a sale at settlement,
+         *     so there a follow buys only what the cash the account has now and those limits pay for whole, best first, and the
          *     run's log names each BUY that waits for a later follow. The order gates refuse each order of a ranking follow on a
          *     login that is not on SinoPac's simulation server again. A ranking follow never orders with real money.
          */
@@ -2074,10 +2075,10 @@ export interface components {
          */
         BrokerResponse: {
             broker: components["schemas"]["ExecutionProvider"];
-            /** Max Daily Buy Value */
-            max_daily_buy_value: number | null;
-            /** Max Order Value */
-            max_order_value: number | null;
+            /** Max Daily Buy Equity Pct */
+            max_daily_buy_equity_pct: number | null;
+            /** Max Order Equity Pct */
+            max_order_equity_pct: number | null;
             server: components["schemas"]["ShioajiServer"] | null;
         };
         /**
@@ -3043,6 +3044,7 @@ export interface components {
             id: string;
             limit_price: components["schemas"]["PositiveFiniteFloat"] | null;
             order_type: components["schemas"]["OrderType"];
+            price_at_signal: components["schemas"]["PositiveFiniteFloat"];
             /** Quantity */
             quantity: number;
             /** Realized Pnl */

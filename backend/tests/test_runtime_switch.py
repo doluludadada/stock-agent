@@ -248,19 +248,19 @@ async def test_a_refused_edit_on_disk_keeps_the_runtime_and_is_tried_again_only_
     switch = await started(project, opener)
     running = switch.running
 
-    edit(project, "  max_order_value: 100000", "  max_order_value: plenty")
+    edit(project, "  max_order_equity_pct: 0.25", "  max_order_equity_pct: plenty")
     refused = await switch.reload()
     again = await switch.reload()
 
-    assert isinstance(refused, ReloadRefused) and [problem.path for problem in refused.problems] == ["trading.max_order_value"]
+    assert isinstance(refused, ReloadRefused) and [problem.path for problem in refused.problems] == ["trading.max_order_equity_pct"]
     assert refused.problems[0].line is not None and again is None
     assert switch.running == running and len(opener.opened) == 1
 
-    edit(project, "  max_order_value: plenty", "  max_order_value: 90000")
+    edit(project, "  max_order_equity_pct: plenty", "  max_order_equity_pct: 0.3")
     reload = await switch.reload()
 
     with switch.hold() as current:
-        assert reload is not None and current.runtime.config.trading.max_order_value == 90_000
+        assert reload is not None and current.runtime.config.trading.max_order_equity_pct == 0.3
 
 
 async def test_a_reload_that_changes_the_audience_is_refused_and_the_runtime_keeps_the_audience_it_started_on(project: Path) -> None:

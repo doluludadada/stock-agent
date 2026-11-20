@@ -82,7 +82,7 @@ async def test_an_edit_during_an_option_waits_for_the_next_round_which_reloads_a
     harness = build_harness(settings_root=project, sinopac=True)
     harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
     monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
-    ask = answers(project, ("max_order_value: 100000", "max_order_value: 90000"), choices=["4", "0"])
+    ask = answers(project, ("max_order_equity_pct: 0.25", "max_order_equity_pct: 0.3"), choices=["4", "0"])
 
     with patch.object(Prompt, "ask", ask), patch.object(Confirm, "ask", confirm):
         await interactive.interactive_menu()
@@ -92,7 +92,8 @@ async def test_an_edit_during_an_option_waits_for_the_next_round_which_reloads_a
     assert (order.status, [placed.stock_id for placed in harness.broker.placed]) == (OrderStatus.FILLED, ["2317"])
     assert output.count("Settings reloaded: appsetting.yaml") == 1
     reloaded = output.index("Settings reloaded: appsetting.yaml")
-    assert "each BUY at most 100,000 NT$" in output[:reloaded] and "each BUY at most 90,000 NT$" in output[reloaded:]
+    assert "each BUY at most 25% of the account's equity" in output[:reloaded]
+    assert "each BUY at most 30% of the account's equity" in output[reloaded:]
 
 
 async def test_an_edit_on_disk_the_app_would_refuse_keeps_the_cli_on_its_settings_and_says_where(
@@ -101,15 +102,15 @@ async def test_an_edit_on_disk_the_app_would_refuse_keeps_the_cli_on_its_setting
     harness = build_harness(settings_root=project, sinopac=True)
     harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
     monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
-    ask = answers(project, ("max_order_value: 100000", "max_order_value: plenty"), choices=["4", "4", "0"])
+    ask = answers(project, ("max_order_equity_pct: 0.25", "max_order_equity_pct: plenty"), choices=["4", "4", "0"])
 
     with patch.object(Prompt, "ask", ask), patch.object(Confirm, "ask", confirm):
         await interactive.interactive_menu()
 
     output = screen.getvalue()
     refused = output.index("The settings files on disk would not start, so the CLI keeps its settings:")
-    assert "trading.max_order_value: Input should be" in output[refused:] and "appsetting.yaml line " in output[refused:]
-    assert "each BUY at most 100,000 NT$" in output[refused:] and "Settings reloaded" not in output
+    assert "trading.max_order_equity_pct: Input should be" in output[refused:] and "appsetting.yaml line " in output[refused:]
+    assert "each BUY at most 25% of the account's equity" in output[refused:] and "Settings reloaded" not in output
     assert output.count("would not start") == 1, "the same refused files are not opened and reported again each round"
 
 
@@ -135,7 +136,7 @@ async def test_a_save_made_while_the_menu_waits_reaches_the_ordering_option_chos
             return "2317"
 
         if len(remaining) == 3:
-            edit(project, "max_order_value: 100000", "max_order_value: 1")
+            edit(project, "max_order_equity_pct: 0.25", "max_order_equity_pct: 0.01")
 
         return remaining.pop(0)
 
@@ -145,5 +146,8 @@ async def test_a_save_made_while_the_menu_waits_reaches_the_ordering_option_chos
     output = screen.getvalue()
     assert (harness.real_broker.placed, harness.broker.placed) == ([], [])
     again = output.index("The settings changed while the menu waited. Choose again on them.")
-    assert "each BUY at most 100,000 NT$" in output[:again] and "each BUY at most 1 NT$" in output[again:]
-    assert output.index("each BUY at most 1 NT$", again) < output.index("Stock Reports") < output.index("Each BUY at most 1 NT$")
+    assert (
+        "each BUY at most 25% of the account's equity" in output[:again]
+        and "each BUY at most 1% of the account's equity" in output[again:]
+    )
+    assert output.index("each BUY at most 1% ", again) < output.index("Stock Reports") < output.index("Each BUY at most 1% ")

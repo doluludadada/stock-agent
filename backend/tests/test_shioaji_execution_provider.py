@@ -18,6 +18,7 @@ from shioaji.constant import (
     StockPriceType,
     Unit,
 )
+from shioaji.contracts import Stock as StockContract
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.order import Order as BrokerOrder
 from shioaji.position import AccountBalance
@@ -112,6 +113,7 @@ def quotes_of(connection: ShioajiConnection, login: ShioajiLogin) -> ShioajiQuot
         connection=connection,
         new_client=FakeShioaji,
         login=login,
+        shioaji=CONFIG.shioaji,
         market_clock=TaiwanMarketClock(CONFIG.market_hours),
         market_data=CONFIG.market_data,
         board_lot_shares=1000,
@@ -134,6 +136,7 @@ def order(
         order_type=OrderType.LIMIT if price is not None else OrderType.MARKET,
         quantity=quantity,
         limit_price=price,
+        price_at_signal=price or 100.0,
         time_in_force=time_in_force,
         created_at=NOW,
         updated_at=NOW,
@@ -247,6 +250,26 @@ async def test_a_buy_is_refused_when_cash_minus_settlement_payments_due_cannot_p
 
     assert (placed.status, client.placed) == (OrderStatus.REJECTED, [])
     assert placed.reason == "INSUFFICIENT_CASH: needs 100,142 including fee, cash is 50,000"
+
+
+@pytest.mark.parametrize(("available", "answered"), [(350_000, 350_000.0), (0, None)], ids=["production", "simulation"])
+async def test_the_trading_limit_left_is_sinopacs_answer_while_positive_and_no_limit_known_at_zero(
+    available: int, answered: float | None
+) -> None:
+    """The simulation server answered 0 for every figure on 2026-11-19: no limit known, not a limit of nothing."""
+    client = FakeShioaji(trading_available=available)
+
+    assert await provider(client).trading_available() == answered
+    assert client.bank_reads == ["trading_limits"] and client.placed == []
+
+
+async def test_a_trading_limit_that_cannot_be_read_is_no_limit_known_and_the_log_names_no_server_words() -> None:
+    logger = RecordingLogger()
+    client = FakeShioaji(trading_available=350_000, refusals={"trading_limits": RuntimeError("A123456789 at 203.0.113.7 refused")})
+
+    assert await provider(client, logger=logger).trading_available() is None
+    assert [level for level, _ in logger.records] == ["warning"]
+    assert not any("A123456789" in line or "203.0.113.7" in line for _, line in logger.records)
 
 
 async def test_selling_more_than_the_broker_holds_is_refused() -> None:
@@ -695,6 +718,7 @@ def logged_in(logger: RecordingLogger) -> tuple[FakeShioaji, ShioajiQuoteProvide
         connection=connection,
         new_client=FakeShioaji,
         login=login_of(simulation=True),
+        shioaji=CONFIG.shioaji,
         market_clock=TaiwanMarketClock(CONFIG.market_hours),
         market_data=CONFIG.market_data,
         board_lot_shares=1000,
@@ -803,6 +827,82 @@ async def test_a_timed_out_place_order_on_a_busy_day_is_still_found_by_its_tag()
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FILLED, 1000)
     assert set(client.account_refreshes) == {30_000}
+
+
+def banded(reference: float, updated_on: date | None = MONDAY, **options) -> FakeShioaji:
+    """A broker whose 2330 contract bands the day 10% each side of `reference`, as of `updated_on`, and holds 1000 shares of it."""
+    contracts = FakeContracts(FakeStocks({"2330": stock("2330", reference, updated_on)}))
+    return FakeShioaji(Contracts=contracts, holdings=[position("2330", 1000, 90.0)], **options)
+
+
+def decided_at(action: TradeAction, price: float) -> Order:
+    """An order decided at `price`, limited as LimitPriceRule limits it: at most 2% past it."""
+    return replace(order(action, price=CONFIG.limit_price_rule().apply(action, "2330", price)), price_at_signal=price)
+
+
+@pytest.mark.parametrize(
+    ("action", "price", "capped", "edge"),
+    [(TradeAction.SELL, 87.0, 85.3, 85.5), (TradeAction.BUY, 103.0, 105.0, 104.5)],
+    ids=["stop-loss-sell", "buy"],
+)
+async def test_a_limit_past_the_days_price_band_goes_to_the_exchange_at_the_bands_edge_and_the_order_keeps_it(
+    action: TradeAction, price: float, capped: float, edge: float
+) -> None:
+    """
+    A reference of 95 bands the day from 85.5 to 104.5, and TWSE and TPEx refuse an order priced past it, so a stop-loss
+    SELL at 85.3 would be refused on every run of the very days it is for. The order's own limit moves, so its journal
+    row, its settlement and the deals agree on the price sent.
+    """
+    placing = decided_at(action, price)
+    assert placing.limit_price == capped
+
+    placed = await provider(banded(95.0)).place_order(placing, no_refusal, asyncio.Event())
+
+    assert (placed.status, placed.limit_price, placed.average_filled_price) == (OrderStatus.FILLED, edge, edge)
+
+
+async def test_an_order_whose_answer_was_lost_at_the_bands_edge_is_settled_from_the_part_sent_there() -> None:
+    client = banded(95.0, place_error=ShioajiTimeoutError("place_order", {}), place_error_after_accepting=True)
+    client.unlisted_refreshes = CONFIG.shioaji.max_polls
+    broker = provider(client)
+    placed = await broker.place_order(decided_at(TradeAction.BUY, 103.0), no_refusal, asyncio.Event())
+    assert (placed.status, placed.limit_price) == (OrderStatus.UNCONFIRMED, 104.5)
+
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity, [trade.order.price for trade in client.placed]) == (
+        OrderStatus.FILLED,
+        1000,
+        [104.5],
+    )
+
+
+@pytest.mark.parametrize(
+    "contract",
+    [
+        stock("2330", 95.0, MONDAY - timedelta(days=3)),
+        stock("2330", 95.0),
+        stock("2330", 95.0, MONDAY).model_copy(update={"limit_up": 0.0, "limit_down": 0.0}),
+    ],
+    ids=["of-an-earlier-session", "of-no-day", "of-no-band"],
+)
+async def test_a_contract_without_the_days_band_leaves_each_limit_as_it_was_set_and_says_so_once_a_session(
+    contract: StockContract,
+) -> None:
+    """The process reads the contracts once, at its login, so one that runs past that day holds an older day's band."""
+    client = FakeShioaji(Contracts=FakeContracts(FakeStocks({"2330": contract})), holdings=[position("2330", 1000, 90.0)])
+    logger = RecordingLogger()
+    broker = provider(client, logger=logger)
+
+    first = await broker.place_order(decided_at(TradeAction.SELL, 87.0), no_refusal, asyncio.Event())
+    second = await broker.place_order(decided_at(TradeAction.BUY, 103.0), no_refusal, asyncio.Event())
+
+    assert [trade.order.price for trade in client.placed] == [85.3, 105.0]
+    assert (first.limit_price, second.limit_price) == (85.3, 105.0)
+    assert [message for level, message in logger.records if level == "warning" and "price band" in message] == [
+        "Shioaji's contracts hold no price band of 2026-10-19, so each limit is sent as set, and the exchange refuses one past "
+        "that day's band: they were read at the login"
+    ]
 
 
 LATE_DEALS = ((114.0, 150), (114.5, 280))

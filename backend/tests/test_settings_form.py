@@ -26,6 +26,7 @@ from b_application.config.settings_loader import (
     with_change,
     with_changes,
 )
+from b_application.config.trading_config import TradingConfig
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -220,10 +221,12 @@ def test_the_form_of_the_repository_settings_lists_every_setting_once_from_the_s
     assert by_path["ai.available_models"].kind == SettingKind.STRUCTURE
     assert by_path["ai.user_selectable"].kind == SettingKind.CHOICES
     assert by_path["ai.user_selectable"].options == tuple(provider.value for provider in AiProvider)
-    temperature, active_model, buy_limit = (by_path[path] for path in ("ai.temperature", "ai.active_model", "trading.max_order_value"))
+    temperature, active_model, buy_limit = (
+        by_path[path] for path in ("ai.temperature", "ai.active_model", "trading.max_order_equity_pct")
+    )
     assert (temperature.kind, temperature.minimum, temperature.maximum, temperature.step) == (SettingKind.RANGE, 0, 2, 0.1)
     assert (active_model.kind, active_model.options) == (SettingKind.CHOICE, tuple(provider.value for provider in AiProvider))
-    assert (buy_limit.kind, buy_limit.unit, buy_limit.value) == (SettingKind.STEPS, SettingUnit.TWD, 100000)
+    assert (buy_limit.kind, buy_limit.unit, buy_limit.value) == (SettingKind.STEPS, SettingUnit.PERCENT, 0.25)
     assert buy_limit.value in buy_limit.steps
     assert {key.settings_path for key in InstructionKey} <= by_path.keys()
     assert str(by_path["ai.system_prompt"].value).startswith("You are an expert Financial Analyst")
@@ -330,14 +333,14 @@ def test_a_setting_a_class_adds_gets_its_control_from_its_type_and_bounds_alone(
 
 def test_a_value_on_disk_that_is_none_of_the_steps_shows_and_survives_a_save_of_another_setting() -> None:
     texts = repository_texts()
-    custom = texts[SettingsFile.APPSETTING].replace("max_order_value: 100000", "max_order_value: 123456", 1)
+    custom = texts[SettingsFile.APPSETTING].replace("max_order_equity_pct: 0.25", "max_order_equity_pct: 0.123", 1)
     before = {**texts, SettingsFile.APPSETTING: custom}
     shown = {field.path: field for field in settings_fields({file: parsed_document(file, text) for file, text in before.items()})}
-    after = edited(before, ("trading.max_daily_buy_value", 500000), ("trading.max_order_value", 123456))
+    after = edited(before, ("trading.max_daily_buy_equity_pct", 1.5), ("trading.max_order_equity_pct", 0.123))
 
     assert custom != texts[SettingsFile.APPSETTING]
-    assert shown["trading.max_order_value"].value == 123456 and 123456 not in shown["trading.max_order_value"].steps
-    assert after[SettingsFile.APPSETTING] == custom.replace("max_daily_buy_value: 300000", "max_daily_buy_value: 500000", 1)
+    assert shown["trading.max_order_equity_pct"].value == 0.123 and 0.123 not in shown["trading.max_order_equity_pct"].steps
+    assert after[SettingsFile.APPSETTING] == custom.replace("max_daily_buy_equity_pct: 1.1", "max_daily_buy_equity_pct: 1.5", 1)
 
 
 def test_a_file_without_a_setting_added_since_starts_on_its_default_and_the_start_says_nothing_of_it(tmp_path: Path) -> None:
@@ -411,6 +414,42 @@ def test_a_db_section_left_empty_by_deleting_the_retired_setting_starts_saves_an
     assert load_settings(project).db == load_settings(PROJECT).db
     assert load_settings(project, saved).notifications.recipients == ["owner"]
     assert not [notice for notice in settings_notices(project) if "db." in notice]
+
+
+TRADING_SECTION_BEFORE_THE_EQUITY_LIMITS = (
+    "trading:\n"
+    "  # Most one SinoPac BUY may cost at its limit price, in NT$.\n"
+    "  max_order_value: 100000\n"
+    "  # Most the SinoPac BUYs of one Taiwan calendar day may cost together.\n"
+    "  max_daily_buy_value: 300000\n"
+)
+"""A deployed trading section that set only the two fixed NT$ limits, which the shares of the equity replaced."""
+
+
+@pytest.mark.parametrize(
+    "section",
+    [TRADING_SECTION_BEFORE_THE_EQUITY_LIMITS, "trading:\n  # Most one SinoPac BUY may cost at its limit price, in NT$.\n", ""],
+    ids=["retired-limits", "emptied-by-removing-them", "absent"],
+)
+def test_a_trading_section_that_set_only_the_retired_limits_starts_on_the_defaults_once_they_are_removed(
+    tmp_path: Path, section: str
+) -> None:
+    shipped = repository_texts()[SettingsFile.APPSETTING]
+    start, end = shipped.index("\ntrading:\n") + 1, shipped.index("\nmock_trading:\n") + 1
+    project = project_with(tmp_path, f"{shipped[:start]}{section}{shipped[end:]}")
+    saved = edited(settings_texts(project), ("trading.limit_offset_pct", 0.01))
+
+    assert load_settings(project).trading == load_settings(PROJECT).trading == TradingConfig()
+    assert load_settings(project, saved).trading.limit_offset_pct == 0.01
+    retired = [notice for notice in settings_notices(project) if "trading." in notice]
+    assert retired == (
+        [
+            "appsetting.yaml still sets trading.max_order_value, trading.max_daily_buy_value: the app no longer reads them. "
+            "Remove them from the file."
+        ]
+        if "max_order_value" in section
+        else []
+    )
 
 
 def test_a_file_that_still_sets_the_rankings_timestamp_settings_starts_and_the_start_names_them(tmp_path: Path) -> None:

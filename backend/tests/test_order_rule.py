@@ -17,7 +17,7 @@ NOW = datetime(2026, 10, 19, 10, 20, tzinfo=TAIWAN_TIMEZONE)
 COSTS = TradingCostRule(
     fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
 )
-LIMIT_PRICE = shipped_config().market.limit_price_rule()
+LIMIT_PRICE = shipped_config().limit_price_rule()
 
 
 LAST_CLOSE = datetime(2026, 10, 16, 13, 30, tzinfo=TAIWAN_TIMEZONE)
@@ -45,14 +45,18 @@ def buy_signal(quoted_at: datetime) -> TradeSignal:
     return signal_at(quoted_at)
 
 
-def test_a_fresh_decision_becomes_a_pending_ioc_limit_order_at_its_price() -> None:
-    signal = buy_signal(quoted_at=NOW - timedelta(minutes=15))
+@pytest.mark.parametrize(("action", "limit"), [(TradeAction.BUY, 102), (TradeAction.SELL, 98)], ids=["buy", "sell"])
+def test_a_fresh_decision_becomes_a_pending_ioc_order_marketable_up_to_two_percent_past_its_price(
+    action: TradeAction, limit: float
+) -> None:
+    signal = signal_at(NOW - timedelta(minutes=15), action=action)
     run_id = new_run_id()
 
     order = RULE.apply(signal, run_id, now=NOW, phase=TradingPhase.CONTINUOUS, last_close=LAST_CLOSE)
 
     assert (order.status, order.order_type, order.time_in_force) == (OrderStatus.PENDING, OrderType.LIMIT, TimeInForce.IOC)
-    assert (order.limit_price, order.quantity, order.run_id, order.decision_id) == (100, 1000, run_id, signal.decision_id)
+    assert (order.limit_price, order.price_at_signal, order.quantity) == (limit, 100, 1000)
+    assert (order.run_id, order.decision_id) == (run_id, signal.decision_id)
 
 
 @pytest.mark.parametrize(
@@ -85,12 +89,12 @@ def test_a_quote_fresh_when_fetched_is_refused_once_it_aged_past_the_limit() -> 
 
 
 @pytest.mark.parametrize(
-    ("action", "yahoo_quote", "exchange_price"),
-    [(TradeAction.BUY, 28.399999618530273, 28.4), (TradeAction.SELL, 28.350000381469727, 28.35)],
+    ("action", "yahoo_quote", "exchange_price", "limit"),
+    [(TradeAction.BUY, 28.399999618530273, 28.4, 28.95), (TradeAction.SELL, 28.350000381469727, 28.35, 27.8)],
     ids=["buy", "sell"],
 )
-def test_an_order_priced_from_a_float32_quote_takes_an_exchange_fill_at_that_price(
-    action: TradeAction, yahoo_quote: float, exchange_price: float
+def test_an_order_priced_from_a_float32_quote_is_capped_from_its_tick_and_takes_an_exchange_fill_at_that_price(
+    action: TradeAction, yahoo_quote: float, exchange_price: float, limit: float
 ) -> None:
     order = RULE.apply(
         signal_at(NOW, yahoo_quote, action), new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS, last_close=LAST_CLOSE
@@ -100,7 +104,7 @@ def test_an_order_priced_from_a_float32_quote_takes_an_exchange_fill_at_that_pri
     cost = COSTS.apply(action, "2330", exchange_price, 1000, now=NOW)
     order.fill(1000, exchange_price, cost.fee, cost.tax, now=NOW)
 
-    assert (order.status, repr(order.limit_price)) == (OrderStatus.FILLED, repr(exchange_price))
+    assert (order.status, repr(order.limit_price), order.average_filled_price) == (OrderStatus.FILLED, repr(limit), exchange_price)
 
 
 def close_signal(session_close: datetime, price: float = 77) -> TradeSignal:
@@ -117,7 +121,12 @@ def test_an_official_close_prices_a_mock_order_while_no_session_trades() -> None
 
     order = rule.apply(close_signal(LAST_CLOSE), new_run_id(), now=SATURDAY, phase=TradingPhase.CLOSED, last_close=LAST_CLOSE)
 
-    assert (order.status, order.limit_price, order.time_in_force) == (OrderStatus.PENDING, 77, TimeInForce.IOC)
+    assert (order.status, order.limit_price, order.price_at_signal, order.time_in_force) == (
+        OrderStatus.PENDING,
+        78.5,
+        77,
+        TimeInForce.IOC,
+    )
 
 
 @pytest.mark.parametrize(

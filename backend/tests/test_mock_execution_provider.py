@@ -41,8 +41,14 @@ async def open_broker(
 
 
 def order(
-    action: TradeAction, quantity: int, price: float, time_in_force: TimeInForce = TimeInForce.IOC, stock_id: str = "2330"
+    action: TradeAction,
+    quantity: int,
+    price: float,
+    time_in_force: TimeInForce = TimeInForce.IOC,
+    stock_id: str = "2330",
+    limit: float | None = None,
 ) -> Order:
+    """An order decided at `price`, limited at `limit`, the price itself unless a test moves it."""
     return Order(
         run_id=new_run_id(),
         decision_id=new_decision_id(),
@@ -50,7 +56,8 @@ def order(
         action=action,
         order_type=OrderType.LIMIT,
         quantity=quantity,
-        limit_price=price,
+        limit_price=limit or price,
+        price_at_signal=price,
         time_in_force=time_in_force,
         created_at=NOW,
         updated_at=NOW,
@@ -79,6 +86,34 @@ async def test_buy_fills_against_a_real_database_and_pays_the_fee(tmp_path) -> N
     )
     assert await cash(broker) == 1_000_000 - 100_142
     assert await holdings(broker) == [("2330", 1000, pytest.approx(100.142))]
+    await db.close()
+
+
+@pytest.mark.parametrize(
+    ("decided", "limit", "filled"), [(100.0, 102.0, 100.0), (100.2, 102.0, 100.5), (99.9000015258789, 101.5, 99.9)]
+)
+async def test_a_marketable_buy_fills_at_the_price_its_decision_saw_as_a_tick_never_at_its_limit(
+    tmp_path, decided: float, limit: float, filled: float
+) -> None:
+    """The market trades at the decided price; an off-tick one rounds up as a BUY executes it, a float32 quote is its tick."""
+    db, broker = await open_broker(tmp_path)
+
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, decided, limit=limit), no_refusal, asyncio.Event())
+    cost = round(filled * 1000) + int(filled * 1000 * 0.001425)
+
+    assert (placed.status, placed.limit_price, placed.average_filled_price) == (OrderStatus.FILLED, limit, filled)
+    assert await cash(broker) == pytest.approx(1_000_000 - cost)
+    await db.close()
+
+
+async def test_a_marketable_sell_fills_at_the_price_its_decision_saw_never_at_its_limit_below_it(tmp_path) -> None:
+    db, broker = await open_broker(tmp_path)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100, limit=102), no_refusal, asyncio.Event())
+
+    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, limit=107.5), no_refusal, asyncio.Event())
+
+    assert (sold.status, sold.average_filled_price, sold.fee, sold.tax) == (OrderStatus.FILLED, 110, 156, 330)
+    assert await cash(broker) == pytest.approx(1_000_000 - 100_142 + 110_000 - 156 - 330)
     await db.close()
 
 

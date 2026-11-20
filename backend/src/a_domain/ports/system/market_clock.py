@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Protocol
 
 from a_domain.types.enums import TradingPhase
@@ -38,6 +38,13 @@ class IMarketClock(Protocol):
         """
         The latest weekday session whose daily bar is final in every price source, which happens a while after its close.
         Exchange holidays are not modelled.
+        """
+        ...
+
+    def last_market_time(self, at: time) -> datetime:
+        """
+        The latest moment, now or before, at which a weekday's clock in the exchange's zone read `at`: today's while it
+        is a weekday and `at` has come, else the weekday's before. Exchange holidays are not modelled.
         """
         ...
 

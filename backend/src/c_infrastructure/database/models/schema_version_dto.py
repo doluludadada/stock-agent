@@ -86,6 +86,22 @@ async def add_the_unconfirmed_order_status(connection: AsyncConnection) -> None:
     await connection.execute(text("ALTER TYPE orderstatus ADD VALUE IF NOT EXISTS 'UNCONFIRMED' AFTER 'SUBMITTED'"))
 
 
+async def add_the_price_an_order_was_decided_at(connection: AsyncConnection) -> None:
+    """
+    Version 15 to 16: an order keeps the price its decision saw, since its limit may now lie past it. Every order before
+    it was limited at that price as a tick, and its decision's row holds the price itself; one whose decision row is
+    gone keeps its limit, the price it was decided at as a tick.
+    """
+    await connection.execute(text("ALTER TABLE orders ADD COLUMN price_at_signal FLOAT"))
+    await connection.execute(
+        text(
+            "UPDATE orders SET price_at_signal = COALESCE((SELECT trade_signals.price_at_signal FROM trade_signals "
+            "WHERE trade_signals.decision_id = orders.decision_id), limit_price)"
+        )
+    )
+    await connection.execute(text("ALTER TABLE orders ALTER COLUMN price_at_signal SET NOT NULL"))
+
+
 def vector_extension_refusal(error: DBAPIError) -> str:
     """Why the database could not get pgvector's extension, in the driver's own words, and how it gets the extension."""
     driver_error = error.orig.__cause__ if error.orig is not None else None
@@ -104,6 +120,7 @@ UPGRADES: tuple[UpgradeStep, ...] = (
     add_the_account_of_the_scheduled_follow,
     add_the_vector_extension,
     add_the_unconfirmed_order_status,
+    add_the_price_an_order_was_decided_at,
 )
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n] turns version FIRST_SCHEMA_VERSION + n

@@ -142,13 +142,17 @@ def harness_config() -> AppConfig:
     """
     The shipped settings on a developer's machine, with registration open and every feature shown to every user: the
     shipped settings keep registration closed and show a user only the research pages, and these tests are about what
-    a user's own data and runs do. tests/test_feature_visibility.py covers the shipped visibility.
+    a user's own data and runs do. tests/test_feature_visibility.py covers the shipped visibility. Each order is limited
+    at the price its decision saw (trading.limit_offset_pct 0), so a test's shares and cash are its own arithmetic; the
+    shipped marketable limit has its own tests (test_tick_rule.py, test_order_rule.py, test_mock_execution_provider.py)
+    and the database stack's runs keep it (trading_stack.py: test_ranking_follow.py, test_trading_audit.py).
     """
     shipped = shipped_config(Path(__file__).resolve().parents[3])
 
     return shipped.model_copy(
         update={
             "environment": SystemEnvironment.DEV,
+            "trading": shipped.trading.model_copy(update={"limit_offset_pct": 0.0}),
             "accounts": shipped.accounts.model_copy(update={"registration_open": True}),
             "features": FeaturesConfig.model_validate({feature.value: FeatureVisibility.EVERYONE for feature in Feature}),
             "prompts": PromptsConfig(

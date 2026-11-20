@@ -735,8 +735,9 @@ class FakeSentimentClassifier:
 
 class RecordingExecutionProvider:
     """
-    Broker that records each place_order call and fills it in full at its limit, charging fees like the mock, and
-    whose account then holds the fill where its cash or its position covers it, as a test set them. Its `link` says
+    Broker that records each place_order call and fills it in full at the price its decision saw, as the mock account's
+    market does under the order's marketable limit, charging fees like the mock, and whose account then holds the fill
+    where its cash or its position covers it, as a test set them. Its `link` says
     which broker it stands for: the mock account unless a test makes it SinoPac. `requests` names each read of the
     account a caller sent it, in order. `before_send` runs at each place_order before the order's last check, as a
     change elsewhere between an order and its send.
@@ -753,6 +754,7 @@ class RecordingExecutionProvider:
         self.fills: list[BrokerFill] = []
         self.sales: list[BrokerFill] = []
         self.placed: list[Order] = []
+        self.trading_limit: float | None = None
         self._cost_rule = cost_rule or TradingCostRule(
             fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
         )
@@ -770,16 +772,17 @@ class RecordingExecutionProvider:
         self.placed.append(replace(order))
         assert order.limit_price is not None, "the app sends LIMIT orders only"
 
-        cost = self._cost_rule.apply(order.action, order.stock_id, order.limit_price, order.quantity, now=datetime.now(UTC))
+        price = order.price_at_signal
+        cost = self._cost_rule.apply(order.action, order.stock_id, price, order.quantity, now=datetime.now(UTC))
         held = next((position for position in self.positions if position.stock_id == order.stock_id), None)
         realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
         order.submit(now=datetime.now(UTC))
-        order.fill(order.quantity, order.limit_price, cost.fee, cost.tax, realized_pnl, now=datetime.now(UTC))
+        order.fill(order.quantity, price, cost.fee, cost.tax, realized_pnl, now=datetime.now(UTC))
         account = self.account_now()
 
         if order.action == TradeAction.BUY and account.can_afford(-cost.net):
-            account.buy(order.stock_id, order.quantity, price=order.limit_price, total_cost=-cost.net)
+            account.buy(order.stock_id, order.quantity, price=price, total_cost=-cost.net)
         elif held is not None and held.can_cover(order.quantity):
             account.sell(order.stock_id, order.quantity, cash_delta=cost.net)
 
@@ -796,6 +799,11 @@ class RecordingExecutionProvider:
     async def open_positions(self) -> list[Position]:
         self.requests.append("open_positions")
         return [replace(position) for position in self.positions]
+
+    async def trading_available(self) -> float | None:
+        """The broker's own trading limit left, as a test set it: None, no limit known, unless it set one."""
+        self.requests.append("trading_available")
+        return self.trading_limit
 
     async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
         """A real broker's own report of the account: the positions as held, and the fills and sales a test set."""

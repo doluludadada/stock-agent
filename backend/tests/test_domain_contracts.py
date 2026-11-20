@@ -30,6 +30,7 @@ def limit_order(action: TradeAction = TradeAction.BUY) -> Order:
         time_in_force=TimeInForce.IOC,
         quantity=1,
         limit_price=100,
+        price_at_signal=100,
         created_at=NOW,
         updated_at=NOW,
     )

@@ -149,26 +149,26 @@ def test_every_yaml_file_in_config_is_a_settings_file() -> None:
 
 
 def test_a_file_that_does_not_parse_is_refused_at_the_parsers_mark() -> None:
-    text = SHIPPED[SettingsFile.APPSETTING].replace("  max_order_value: 100000\n", "  max_order_value: [100000\n", 1)
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  max_order_equity_pct: 0.25\n", "  max_order_equity_pct: [0.25\n", 1)
 
     [problem] = refused(SettingsFile.APPSETTING, text)
 
     assert (problem.file, problem.message.startswith("YAML: ")) == (SettingsFile.APPSETTING, True)
-    assert problem.line is not None and problem.line > at(text, "  max_order_value: [100000")[0]
+    assert problem.line is not None and problem.line > at(text, "  max_order_equity_pct: [0.25")[0]
 
 
 def test_a_refused_value_is_located_at_its_key() -> None:
-    text = SHIPPED[SettingsFile.APPSETTING].replace("  max_order_value: 100000", "  max_order_value: plenty", 1)
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  max_order_equity_pct: 0.25", "  max_order_equity_pct: plenty", 1)
 
     [problem] = refused(SettingsFile.APPSETTING, text)
 
     assert (problem.file, problem.path, problem.line, problem.column) == (
         SettingsFile.APPSETTING,
-        "trading.max_order_value",
-        *at(text, "max_order_value: plenty"),
+        "trading.max_order_equity_pct",
+        *at(text, "max_order_equity_pct: plenty"),
     )
     assert "plenty" not in problem.message
-    assert str(problem).startswith(f"appsetting.yaml line {problem.line}, column 3, trading.max_order_value: Input should be")
+    assert str(problem).startswith(f"appsetting.yaml line {problem.line}, column 3, trading.max_order_equity_pct: Input should be")
 
 
 @pytest.mark.parametrize(

@@ -67,8 +67,8 @@ async def get_brokers(runtime: RuntimeDependency, user: CurrentUser) -> list[Bro
         BrokerResponse(
             broker=broker,
             server=config.shioaji.server if broker.real else None,
-            max_order_value=config.trading.max_order_value if broker.real else None,
-            max_daily_buy_value=config.trading.max_daily_buy_value if broker.real else None,
+            max_order_equity_pct=config.trading.max_order_equity_pct if broker.real else None,
+            max_daily_buy_equity_pct=config.trading.max_daily_buy_equity_pct if broker.real else None,
         )
         for broker in runtime.brokers_for(user)
         if broker.ordering_feature in shown_features(runtime, user)

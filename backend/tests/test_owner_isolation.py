@@ -109,6 +109,7 @@ def order_of(run_id: RunId, signal: TradeSignal) -> Order:
         order_type=OrderType.LIMIT,
         quantity=signal.quantity,
         limit_price=signal.price_at_signal,
+        price_at_signal=signal.price_at_signal,
         time_in_force=TimeInForce.IOC,
         created_at=AT,
         updated_at=AT,
@@ -415,6 +416,13 @@ async def open_positions(owners: Owners) -> None:
     assert [position.stock_id for position in await owners.alice.mock_broker.open_positions()] == ["2330"]
 
 
+async def trading_available(owners: Owners) -> None:
+    """The mock account has no trading limit, whoever's book it is and whatever the other owner bought."""
+    await alice_buys(owners)
+
+    assert (await owners.alice.mock_broker.trading_available(), await owners.bob.mock_broker.trading_available()) == (None, None)
+
+
 async def place_order(owners: Owners) -> None:
     filled = await alice_buys(owners)
     sale = replace(order_of(run_stats().run_id, decision()), action=TradeAction.SELL)
@@ -604,6 +612,7 @@ CASES: dict[str, dict[str, Case]] = {
         "link": link,
         "get_account": get_account,
         "open_positions": open_positions,
+        "trading_available": trading_available,
         "place_order": place_order,
         "fill": fill,
         "reset": reset,

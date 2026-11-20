@@ -2,9 +2,9 @@
 The database commands (`just db-status`, `db-backup`, `db-migrate`, `db-restore`) on a real PostgreSQL database: what
 they print, the backups they write, an upgrade that keeps every row, a second migrate and a failed one that change
 nothing, and a restore that puts a backup back after backing the current database up. The tests that migrate give the
-code a step of their own, from one version below the code's, so they hold whatever steps the code has; three tests run
-the code's own steps, from version 9, from version 13 and from version 14. Only a superuser may create pgvector's extension, so the
-tests of a database without it run as the session's superuser (TestDatabase.superuser).
+code a step of their own, from one version below the code's, so they hold whatever steps the code has; four tests run
+the code's own steps, from version 9, from version 13, from version 14 and from version 15. Only a superuser may create
+pgvector's extension, so the tests of a database without it run as the session's superuser (TestDatabase.superuser).
 """
 
 import hashlib
@@ -28,7 +28,8 @@ import c_infrastructure.database.db_connector as db_connector
 import c_infrastructure.database.models.schema_version_dto as schema_version
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import ExecutionProvider, InformationSource, OrderType, TimeInForce, TradeAction, Workflow
+from a_domain.model.trading.signal import TradeSignal
+from a_domain.types.enums import ExecutionProvider, InformationSource, OrderType, SignalSource, TimeInForce, TradeAction, Workflow
 from a_domain.types.ids import new_decision_id
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.schema_version_dto import FIRST_SCHEMA_VERSION, SCHEMA_VERSION
@@ -301,6 +302,7 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
         "ALTER TABLE workflow_runs DROP COLUMN ranking_formula, DROP COLUMN ranking_decided_on, DROP COLUMN scheduled, "
         "DROP COLUMN ranking_open",
         "ALTER TABLE users DROP COLUMN ranking_follow_time, DROP COLUMN ranking_follow_broker",
+        "ALTER TABLE orders DROP COLUMN price_at_signal",
         "INSERT INTO users (user_id, username_sealed, username_index, email_sealed, email_index, password_hash, role, status, "
         "created_at, updated_at) VALUES ('u-before', '\\x01', '\\x02', '\\x03', '\\x04', 'none', 'USER', 'ACTIVE', "
         "'2026-11-03 06:00:00', '2026-11-03 06:00:00')",
@@ -327,7 +329,8 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     assert "12 -> 13 add_the_account_of_the_scheduled_follow" in output.getvalue()
     assert "13 -> 14 add_the_vector_extension" in output.getvalue()
     assert "14 -> 15 add_the_unconfirmed_order_status" in output.getvalue()
-    assert after["schema_version"][1] == [("15",)]
+    assert "15 -> 16 add_the_price_an_order_was_decided_at" in output.getvalue()
+    assert after["schema_version"][1] == [("16",)]
     assert {"ranking_formula", "ranking_decided_on", "scheduled", "ranking_open"} <= set(after["workflow_runs"][0])
     assert "ranking_follow_time" in after["users"][0]
     followed_on = {row[after["users"][0].index("ranking_follow_broker")] for row in after["users"][1]}
@@ -342,9 +345,10 @@ AT_VERSION_14 = (
     "CREATE TYPE orderstatus AS ENUM ('PENDING', 'SUBMITTED', 'FILLED', 'CANCELLED', 'FAILED', 'REJECTED')",
     "ALTER TABLE orders ALTER COLUMN status TYPE orderstatus USING status::text::orderstatus",
     "DROP TYPE orderstatus_of_version_15",
+    "ALTER TABLE orders DROP COLUMN price_at_signal",
     "UPDATE schema_version SET version = 14",
 )
-"""A database of version 14, whose orders' status type has no UNCONFIRMED."""
+"""A database of version 14, whose orders' status type has no UNCONFIRMED and which keeps no order's decided price."""
 
 
 async def order_statuses() -> list[str]:
@@ -386,6 +390,7 @@ async def test_the_step_from_version_14_lets_an_order_await_settlement_and_keeps
             order_type=OrderType.LIMIT,
             quantity=1000,
             limit_price=100.0,
+            price_at_signal=100.0,
             time_in_force=TimeInForce.IOC,
             created_at=MARKET_OPEN,
             updated_at=MARKET_OPEN,
@@ -399,11 +404,70 @@ async def test_the_step_from_version_14_lets_an_order_await_settlement_and_keeps
 
     assert "14 -> 15 add_the_unconfirmed_order_status" in output.getvalue()
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
-    assert {table: after[table] for table in before.keys() - {"schema_version"}} == {
-        table: rows for table, rows in before.items() if table != "schema_version"
-    }
+    unchanged = before.keys() - {"schema_version", "orders"}
+    assert {table: after[table] for table in unchanged} == {table: before[table] for table in unchanged}
+    assert after["orders"] == (sorted([*before["orders"][0], "price_at_signal"]), before["orders"][1])
     assert await order_statuses() == ["PENDING", "SUBMITTED", "UNCONFIRMED", "FILLED", "CANCELLED", "FAILED", "REJECTED"]
     assert unsettled == [order]
+
+
+def decided_order(run: SystemStats, price: float, limit: float) -> tuple[TradeSignal, Order]:
+    """A BUY of 2330 of `run` decided at `price` and limited at `limit`, with the decision it carries out."""
+    decision = TradeSignal(
+        stock_id="2330",
+        action=TradeAction.BUY,
+        source=SignalSource.MANUAL,
+        score=80,
+        reason="explored",
+        quantity=1000,
+        generated_at=MARKET_OPEN,
+        price_at_signal=price,
+        price_observed_at=MARKET_OPEN,
+    )
+    order = Order(
+        run_id=run.run_id,
+        decision_id=decision.decision_id,
+        stock_id="2330",
+        action=TradeAction.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=1000,
+        limit_price=limit,
+        price_at_signal=price,
+        time_in_force=TimeInForce.IOC,
+        created_at=MARKET_OPEN,
+        updated_at=MARKET_OPEN,
+    )
+    return decision, order
+
+
+async def test_the_step_from_version_15_gives_each_order_the_price_its_decision_saw_or_else_its_limit(
+    tmp_path: Path, output: io.StringIO
+) -> None:
+    """An order of version 15 was limited at its decided price as a tick; one whose decision row is gone keeps that limit."""
+    connector = await current_database(tmp_path)
+    journal = TradingJournal(connector.for_owner(LEGACY_OWNER_ID))
+    run = SystemStats(workflow=Workflow.MANUAL_BUY, execution_provider=ExecutionProvider.MOCK, start_time=MARKET_OPEN)
+    decided, recorded = decided_order(run, price=100.2, limit=100.5)
+    _, undecided = decided_order(run, price=98.0, limit=98.0)
+    await journal.save_run(run)
+    await journal.save_signals(run.run_id, [decided])
+    await journal.save_order(recorded)
+    await journal.save_order(undecided)
+    await execute("ALTER TABLE orders DROP COLUMN price_at_signal", "UPDATE schema_version SET version = 15")
+
+    try:
+        with pytest.raises(OutdatedDatabaseError, match="just db-migrate"):
+            await connector.init_db()
+
+        assert await commands.migrate(connector) == 0
+        await connector.init_db()
+        upgraded = {order.id: order for order in await journal.orders_of(run.run_id)}
+    finally:
+        await connector.close()
+
+    assert "15 -> 16 add_the_price_an_order_was_decided_at" in output.getvalue()
+    assert (upgraded[recorded.id], upgraded[undecided.id]) == (recorded, undecided)
+    assert [upgraded[recorded.id].price_at_signal, upgraded[undecided.id].price_at_signal] == [100.2, 98.0]
 
 
 REVENUE = "十月營收創新高 年增四成"
@@ -437,7 +501,10 @@ async def test_the_step_from_version_13_gives_a_database_the_vector_extension_an
     monkeypatch.setenv("DB_USER", test_database.superuser)
     connector = open_database(tmp_path)
     await connector.init_db()
-    at_version_13 = "DROP TABLE article_vectors, chat_conversations; DROP EXTENSION vector; UPDATE schema_version SET version = 13"
+    at_version_13 = (
+        "DROP TABLE article_vectors, chat_conversations; DROP EXTENSION vector; ALTER TABLE orders DROP COLUMN price_at_signal; "
+        "UPDATE schema_version SET version = 13"
+    )
     await as_superuser(test_database.superuser, test_database.name, "; ".join((*ROWS, at_version_13)))
 
     try:

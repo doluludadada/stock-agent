@@ -35,6 +35,7 @@ from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepo
 from a_domain.ports.system.attempt_log import IAttemptLog
 from a_domain.ports.system.identity_provider import IIdentityProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.system.ordering_switch import IOrderingSwitch
 from a_domain.ports.system.settings_confirmations import ISettingsConfirmations
@@ -255,10 +256,16 @@ class Runtime:
 
     config: AppConfig
     logger: ILoggingProvider
+    market_clock: IMarketClock
     broker_market_data: bool
     """Whether the runtime's realtime quotes are the broker's: its Shioaji login was up when it opened."""
     shioaji: ShioajiConnection | None
     """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
+    shioaji_logged_in_at: datetime | None
+    """
+    When the login whose client this runtime's SinoPac keeps succeeded, as `shioaji` said when the runtime opened; None
+    before one did.
+    """
     real_broker: RealBroker | None
     """SinoPac on the site's login, where the audience offers it and its account check passed (connect_shioaji); else None."""
     users_orders: IUsersOrders
@@ -287,8 +294,20 @@ class Runtime:
 
     @property
     def login_down(self) -> bool:
-        """Whether the site's Shioaji login failed or went down, which the Web API's timer opens a runtime to make again."""
+        """Whether the site's Shioaji login failed or went down, which the next use opens a runtime to make again."""
         return self.shioaji is not None and not self.shioaji.up
+
+    @property
+    def login_due(self) -> bool:
+        """
+        Whether the site's Shioaji login is to be made again now (ShioajiConnection.due): it failed, went down or is
+        stale, and no login failed within shioaji.login_retry_seconds. RuntimeSwitch.log_in_again then opens a runtime
+        on these settings, which logs in again on a new client. Also while a later login than this runtime's is up: a
+        login a runtime left running when it did not open within api.settings_build_timeout_seconds succeeded after, so
+        this runtime's SinoPac keeps a client that is no longer the connection's and reports down; the runtime opened
+        then takes that login up and makes none.
+        """
+        return self.shioaji is not None and self.shioaji.due(self.market_clock, self.config.shioaji, self.shioaji_logged_in_at)
 
     def become_current(self) -> None:
         """What the process takes from the settings of the runtime that serves new work: the log level of its one logger."""
@@ -532,10 +551,12 @@ async def connect_shioaji(
     """
     The market data and the SinoPac broker of a runtime on the process's Shioaji login. Both read the client of the
     login on the server shioaji.server names, which the process logs in once and every later runtime on that server
-    reuses, until the login fails or Shioaji reports it down: then the next runtime logs in again on a new client
-    (ShioajiQuoteProvider.connect). A runtime on the other server, after a switch, logs in there on a client of its own.
-    The broker exists where the audience offers it and its account check passes (on production with the CA certificate
-    the production credentials name); a run uses it only when an administrator chooses it.
+    reuses, until the login fails, Shioaji reports it down or refuses its token, or it turns stale at the market day's
+    shioaji.login_renewal_time: then the next runtime logs in again on a new client (ShioajiQuoteProvider.connect,
+    RuntimeSwitch.log_in_again). The broker keeps the client of its runtime's login, so a run never changes client. A
+    runtime on the other server, after a switch, logs in there on a client of its own. The broker exists where the
+    audience offers it and its account check passes (on production with the CA certificate the production credentials
+    name); a run uses it only when an administrator chooses it.
 
     An audience without realtime quotes (public) builds no Shioaji adapter. A personal site without the key pair, or
     whose login fails, has no realtime quote and no SinoPac, so nothing is ordered; its daily history still comes from
@@ -562,12 +583,13 @@ async def connect_shioaji(
         connection=connection,
         new_client=lambda: client_class(simulation=login.server.simulation),
         login=login,
+        shioaji=config.shioaji,
         market_clock=market_clock,
         market_data=config.market_data,
         board_lot_shares=config.market.board_lot_shares,
         logger=logger,
     )
-    server, reused = login.server.label, connection.up
+    server, logged_in_at = login.server.label, connection.logged_in_at
 
     try:
         await quotes.connect()
@@ -575,6 +597,7 @@ async def connect_shioaji(
         logger.warning(f"Shioaji {server} login failed: {error}. No realtime quote, so no order")
         return None, None
 
+    reused = connection.logged_in_at == logged_in_at
     login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
     logger.info(f"{login_line} for realtime quotes")
     return quotes, await connect_sinopac(config, connection, login, market_clock, logger)
@@ -1139,7 +1162,7 @@ def build_pipeline(
         follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
         follow_signals=FollowSignals(journal, market_clock, logger),
         ranking_follow_candidates=RankingFollowCandidates(accounts, market_clock, config),
-        ranking_follow_signals=RankingFollowSignals(journal, market_clock, config, logger),
+        ranking_follow_signals=RankingFollowSignals(journal, broker, market_clock, config, logger),
         ranking_follow_return=RankingFollowReturn(journal, owned.mock_broker, market_clock, config),
         ranking_follow_schedule=RankingFollowSchedule(
             journal, accounts, ordering, dependencies.bar_matrix_provider, market_clock, config
@@ -1259,8 +1282,10 @@ def compose_runtime(
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),
         config=config,
         logger=logger,
+        market_clock=market_clock,
         broker_market_data=dependencies.broker_quotes is not None,
         shioaji=dependencies.shioaji,
+        shioaji_logged_in_at=dependencies.shioaji.logged_in_at if dependencies.shioaji is not None else None,
         real_broker=dependencies.real_broker,
         users_orders=dependencies.users_orders,
     )

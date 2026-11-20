@@ -221,18 +221,23 @@ def line_of(text: str, needle: str) -> int:
     return text[: text.index(needle)].count("\n") + 1
 
 
-def test_the_shipped_settings_name_two_formulas_and_the_shipped_one_is_first_and_active() -> None:
+def test_the_shipped_settings_name_three_formulas_and_the_one_of_ten_stocks_is_active() -> None:
+    """The owner's choice of 2026-11-19: the shipped formula's factors and universe, holding the best 10 in place of 20."""
     ranking = load_settings(ROOT).ranking
+    shipped, ten, cash = ranking.formulas
 
-    assert [formula.name for formula in ranking.formulas] == ["revenue_and_high", "revenue_and_high_cash_60"]
-    assert (ranking.active_formula, ranking.formula()) == ("revenue_and_high", ranking.formulas[0])
-    assert [formula.cash_under_average_sessions for formula in ranking.formulas] == [None, 60]
+    assert [formula.name for formula in ranking.formulas] == ["revenue_and_high", "revenue_and_high_top10", "revenue_and_high_cash_60"]
+    assert (ranking.active_formula, ranking.formula()) == ("revenue_and_high_top10", ten)
+    assert ([formula.top for formula in ranking.formulas], replace(ten, name=shipped.name, top=shipped.top)) == ([20, 10, 20], shipped)
+    assert [formula.cash_under_average_sessions for formula in ranking.formulas] == [None, None, 60]
     assert [[factor.kind.value for factor in formula.factors] for formula in ranking.formulas] == [
         ["revenue_acceleration", "nearness_to_high"],
         ["revenue_acceleration", "nearness_to_high"],
+        ["revenue_acceleration", "nearness_to_high"],
     ]
+    assert cash.top == 20
 
-    with pytest.raises(UnknownRankingFormula, match="revenue_and_high, revenue_and_high_cash_60"):
+    with pytest.raises(UnknownRankingFormula, match="revenue_and_high, revenue_and_high_top10, revenue_and_high_cash_60"):
         ranking.formula("best_lately")
 
 
@@ -252,29 +257,29 @@ WITH_A_THIRD = SHIPPED.replace(
   # The ranking page compares""",
     1,
 )
-"""The shipped settings with a formula of the other factors after the shipped two, so each refusal below has one place."""
+"""The shipped settings with a formula of the other factors after the shipped three, so each refusal below has one place."""
 
 YOY = "        - kind: revenue_yoy\n"
 MONTHS = "          months: 3\n"
 REFUSED = {
-    "unknown-factor": (YOY, "        - kind: sharpe_ratio\n", "ranking.formulas.2.factors.0", "does not match any", "- kind: sharpe"),
+    "unknown-factor": (YOY, "        - kind: sharpe_ratio\n", "ranking.formulas.3.factors.0", "does not match any", "- kind: sharpe"),
     "unknown-factor-setting": (
         MONTHS,
         f"{MONTHS}          weight: 2\n",
-        "ranking.formulas.2.factors.0.revenue_yoy.weight",
+        "ranking.formulas.3.factors.0.revenue_yoy.weight",
         "Unexpected",
         YOY,
     ),
-    "missing-window": (MONTHS, "", "ranking.formulas.2.factors.0.revenue_yoy.months", "Field required", YOY),
+    "missing-window": (MONTHS, "", "ranking.formulas.3.factors.0.revenue_yoy.months", "Field required", YOY),
     "unknown-formula-setting": (
         "      cash_under_average_sessions: 120\n",
         "      stop_loss: 0.1\n",
-        "ranking.formulas.2.stop_loss",
+        "ranking.formulas.3.stop_loss",
         "Unexpected",
         "stop_loss",
     ),
     "unknown-active": (
-        "  active_formula: revenue_and_high\n",
+        "  active_formula: revenue_and_high_top10\n",
         "  active_formula: best_lately\n",
         "ranking",
         "names none of",
@@ -346,8 +351,8 @@ def test_the_settings_form_offers_the_active_formula_as_a_choice_among_the_names
     fields = {field.path: field for field in settings_fields(documents)}
 
     active = fields["ranking.active_formula"]
-    assert (active.kind.value, active.group.value, active.value) == ("choice", "ranking", "revenue_and_high")
-    assert active.options == ("revenue_and_high", "revenue_and_high_cash_60")
+    assert (active.kind.value, active.group.value, active.value) == ("choice", "ranking", "revenue_and_high_top10")
+    assert active.options == ("revenue_and_high", "revenue_and_high_top10", "revenue_and_high_cash_60")
     assert (fields["ranking.formulas"].kind.value, fields["ranking.formulas"].group.value) == ("structure", "advanced")
     assert "ranking.kept_backtests" not in fields and "ranking.top" not in fields
 

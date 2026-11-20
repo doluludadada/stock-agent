@@ -157,6 +157,7 @@ const order = (status: Schemas['OrderStatus'], filled: number, reason: string | 
   order_type: 'limit',
   quantity: 1000,
   limit_price: 512,
+  price_at_signal: 512,
   time_in_force: 'ioc',
   status,
   reason,
@@ -316,8 +317,8 @@ describe('following a finished Full Cycle into the mock account', () => {
 })
 
 const BUY_RUN = '44444444-4444-4444-8444-444444444444'
-const MOCK = { broker: 'mock', server: null, max_order_value: null, max_daily_buy_value: null }
-const SINOPAC = { broker: 'shioaji', server: 'simulation', max_order_value: 100_000, max_daily_buy_value: 300_000 }
+const MOCK = { broker: 'mock', server: null, max_order_equity_pct: null, max_daily_buy_equity_pct: null }
+const SINOPAC = { broker: 'shioaji', server: 'simulation', max_order_equity_pct: 0.25, max_daily_buy_equity_pct: 1.1 }
 
 /** A finished specific-stock analysis that reported 2330 and 2317, the brokers offered, and the BUY's own run. */
 function serveSpecific({ audience = PERSONAL_SITE, brokers = [MOCK, SINOPAC] }: { audience?: Schemas['AudienceResponse']; brokers?: unknown[] } = {}) {
@@ -372,7 +373,7 @@ describe('a manual BUY of a stock a specific-stock analysis reported', () => {
     expect(within(dialog).getByText('BUY 1,000 shares of 2330 TSMC · Mock account')).toBeVisible()
     await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac account · Simulation' }))
     expect(within(dialog).getByText('SinoPac account: Simulation, no real money')).toBeVisible()
-    expect(within(dialog).getByText(/^Each BUY up to NT\$100,000, and BUYs up to NT\$300,000 per Taiwan day\./)).toBeVisible()
+    expect(within(dialog).getByText(/^Each BUY up to 25% of the account’s equity, and BUYs up to 110% of it per Taiwan day\./)).toBeVisible()
     expect(within(dialog).getByText('BUY 1,000 shares of 2330 TSMC · SinoPac account')).toBeVisible()
     expect(buys).toEqual([])
 

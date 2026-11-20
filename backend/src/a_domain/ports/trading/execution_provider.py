@@ -49,6 +49,14 @@ class IExecutionProvider(Protocol):
         """Cash and positions, read together."""
         ...
 
+    async def trading_available(self) -> float | None:
+        """
+        What the broker's own limit on the account's trading still lets it buy today, the limit less what the broker
+        counts used, or None where the broker sets no such limit or does not say: the mock account has none, and
+        SinoPac's simulation server answers 0 for every figure, which is no limit known. It changes nothing at the broker.
+        """
+        ...
+
     async def open_positions(self) -> list[Position]:
         """
         The positions alone, in one read: the mock account's book, or the long cash positions a real broker lists, in

@@ -747,11 +747,14 @@ def section_of(document: dict[str, Any], path: Sequence[str]) -> dict[Any, Any] 
 
 
 def with_value(document: dict[str, Any], keys: Sequence[str], value: Any) -> dict[str, Any]:
-    """`document`, changed in place, with `value` at `keys`, and any section it lacks on the way added."""
+    """`document`, changed in place, with `value` at `keys`, and any section it lacks or that holds nothing on the way added."""
     node = document
 
     for key in keys[:-1]:
-        node = node.setdefault(key, {})
+        if node.get(key) is None:
+            node[key] = {}
+
+        node = node[key]
 
     node[keys[-1]] = value
     return document
@@ -786,8 +789,8 @@ def edited_texts(text: str, keys: Sequence[str], value: Any) -> list[str]:
     `text` with `value` written at `keys`, once for each way writings() offers: in place of the value the text has
     there, right after its key's colon, or at the value's own place when a comment comes between them; or, for a setting
     the text does not set, inserted after the last setting of the deepest block mapping on the way, at the column of
-    that mapping's keys, with any section it lacks as a nested block mapping. None for a setting below a flow mapping or
-    below a key whose value is no mapping.
+    that mapping's keys, or right after the key of a section that holds nothing, with any section it lacks as a nested
+    block mapping. None for a setting below a flow mapping or below a key whose value is no mapping.
     """
     root = yaml.compose(text)
     found = key_value_nodes(root, keys)
@@ -800,7 +803,7 @@ def edited_texts(text: str, keys: Sequence[str], value: Any) -> list[str]:
         written = writings(value, node, key.start_mark.column)
         return [f"{text[:begin]}{writing if begin == colon else writing.lstrip()}{text[end:]}" for writing in written]
 
-    if (place := insertion_place(text, found[-1][1] if found else root)) is None:
+    if (place := insertion_place(text, found[-1] if found else (None, root))) is None:
         return []
 
     position, column = place
@@ -810,13 +813,20 @@ def edited_texts(text: str, keys: Sequence[str], value: Any) -> list[str]:
     return [f"{head}{keys_text}{writing}{text[position:]}" for writing in writings(value, None, column + 2 * (len(missing) - 1))]
 
 
-def insertion_place(text: str, parent: yaml.Node | None) -> tuple[int, int] | None:
+def insertion_place(text: str, found: tuple[yaml.Node | None, yaml.Node | None]) -> tuple[int, int] | None:
     """
-    Where a setting the file lacks goes under `parent`: the end of the line of its last setting, at the column of its
-    keys; the end of a document that holds no setting yet, at column 0; None under a flow mapping or no mapping.
+    Where a setting the file lacks goes under `found`, the (key, value) nodes of its deepest section the file has: the
+    end of the line of that section's last setting, at the column of its keys; right after the colon of a key that holds
+    nothing, as deleting a section's last setting leaves it, two columns past the key; the end of a document that holds
+    no setting yet, at column 0; None under a flow mapping or no mapping.
     """
+    key, parent = found
+
     if parent is None:
         return len(text), 0
+
+    if key is not None and isinstance(parent, yaml.ScalarNode) and parent.style is None and not parent.value:
+        return text.index(":", key.end_mark.index) + 1, key.start_mark.column + 2
 
     if not isinstance(parent, yaml.MappingNode) or parent.flow_style or not parent.value:
         return None

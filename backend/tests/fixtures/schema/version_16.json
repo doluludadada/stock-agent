@@ -1136,6 +1136,11 @@
         "nullable": false,
         "postgresql": "VARCHAR"
       },
+      "price_at_signal": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT"
+      },
       "quantity": {
         "class": "Integer",
         "nullable": false,

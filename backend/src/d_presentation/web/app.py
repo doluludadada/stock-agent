@@ -84,17 +84,19 @@ sends the header `X-Requested-With: stock-agent`, and every write but sign-in, s
 repeats `"confirm": true` in its body.
 
 Orders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY
-of a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and
-trading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by
-default, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server
-in dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within
-trading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a
-finished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in
-continuous trading, or on a site without realtime quotes at the last session's official close while no session
-trades. A ranking follow (`POST /v1/rankings/follow`) brings the user's follow account to the monthly ranking's latest
-decision, priced the same way: the mock account, or SinoPac's simulation account for an administrator the site lets
-order on SinoPac who chose it on My settings, and only there: on a login that is not on SinoPac's simulation server it
-answers 403 `not_simulation` and every order of a ranking follow is refused, whatever the settings.
+of a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates
+and trading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account
+by default, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation
+server in dev and test and on the real account in prod, each BUY within trading.max_order_equity_pct of the
+account's equity and the day's within trading.max_daily_buy_equity_pct of it (`GET /v1/account/brokers` names
+them). Every order is a limit at most trading.limit_offset_pct past the price its decision saw. A follow
+(`POST /v1/runs/{run_id}/follow`) places a finished Full Cycle's open decisions in the user's mock account only,
+priced again: at a fresh realtime quote in continuous trading, or on a site without realtime quotes at the last session's
+official close while no session trades. A ranking follow (`POST /v1/rankings/follow`) brings the user's follow
+account to the monthly ranking's latest decision, priced the same way: the mock account, or SinoPac's simulation
+account for an administrator the site lets order on SinoPac who chose it on My settings, and only there: on a login
+that is not on SinoPac's simulation server it answers 403 `not_simulation` and every order of a ranking follow is
+refused, whatever the settings.
 No endpoint cancels or modifies an order.
 
 Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily

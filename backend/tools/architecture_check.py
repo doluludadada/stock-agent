@@ -180,7 +180,7 @@ PRESENTATION_SETTINGS = {
     # SinoPac page shows the server and the simulation account's starting cash, which its panel switches through the
     # settings save.
     "d_presentation/web/routers/account.py": frozenset(
-        {"shioaji.server", "shioaji.simulation_initial_cash", "trading.max_order_value", "trading.max_daily_buy_value"}
+        {"shioaji.server", "shioaji.simulation_initial_cash", "trading.max_order_equity_pct", "trading.max_daily_buy_equity_pct"}
     ),
     # The Web's request gates: the host names it answers, and the audience's realtime quotes and MOPS, which decide which
     # runs and valuations a browser may start. A run starts under the cap of background runs of the runtime it starts on,
@@ -229,8 +229,8 @@ PRESENTATION_SETTINGS = {
             "audience",
             # The menu's header and a run's broker panel name the SinoPac server the site's login is on.
             "shioaji.server",
-            "trading.max_order_value",
-            "trading.max_daily_buy_value",
+            "trading.max_order_equity_pct",
+            "trading.max_daily_buy_equity_pct",
             "valuation.undervaluation_formula",
             "valuation.low_pe_caveat",
             "freshness.daily_close_max_missed_sessions",
@@ -326,9 +326,18 @@ INFRASTRUCTURE_RULES = {
     # The SinoPac adapter promises the domain order's outcome: it refuses what the app never sends before any request,
     # splits the order into the exchange orders the broker takes, and reads their reports back into fills and costs.
     # It also promises the account's cash, which its own acceptance checks each order against: on the simulation
-    # server, which reports none, that cash is the rule's figure from what the adapter reads of the account.
+    # server, which reports none, that cash is the rule's figure from what the adapter reads of the account. And it
+    # promises an order the exchange takes: a limit inside the day's price band, which only the stock's contract names.
     "c_infrastructure/trading/shioaji/execution_provider.py": frozenset(
-        {"BrokerOutcomeRule", "FillRule", "LotSplitRule", "OrderAcceptanceRule", "SimulationCashRule", "TradingCostRule"}
+        {
+            "BrokerOutcomeRule",
+            "FillRule",
+            "LotSplitRule",
+            "OrderAcceptanceRule",
+            "SimulationCashRule",
+            "TradingCostRule",
+            "limit_within_band",
+        }
     ),
 }
 ANSWER_SOURCES = ("a_domain/model", "a_domain/types", "a_domain/ports")

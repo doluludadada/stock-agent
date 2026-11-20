@@ -142,6 +142,8 @@ class OrderDTO(SQLModel, table=True):
     created_at: datetime = Field(sa_type=UtcDateTime)
     updated_at: datetime = Field(sa_type=UtcDateTime)
     owner_id: str = Field(exclude=True)
+    price_at_signal: float
+    """The price the order's decision saw. Last, as the upgrade to version 16 added it."""
 
 
 class SnapshotPositionJson(BaseModel):

@@ -196,14 +196,15 @@ async def test_a_failed_shioaji_login_leaves_no_quote_and_no_sinopac_saying_why_
     assert not any("bad api key" in line for _, line in logger.records)
 
 
-async def test_the_shipped_settings_are_dev_on_the_simulation_server_with_the_owners_sinopac_limits() -> None:
+async def test_the_shipped_settings_are_dev_on_the_simulation_server_with_the_owners_limits() -> None:
     shipped = load_settings(get_project_root())
 
     assert (shipped.environment, shipped.shioaji.server, shipped.trading) == (
         DEV,
         SIMULATION,
-        TradingConfig(max_order_value=100_000, max_daily_buy_value=300_000),
+        TradingConfig(limit_offset_pct=0.02, max_order_equity_pct=0.25, max_daily_buy_equity_pct=1.1),
     )
+    assert (shipped.ranking.active_formula, shipped.ranking.formula().top) == ("revenue_and_high_top10", 10)
 
 
 @pytest.fixture

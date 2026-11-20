@@ -64,6 +64,11 @@ class Order:
     order_type: OrderType
     quantity: PositiveInt
     limit_price: PositiveFiniteFloat | None = None
+    price_at_signal: PositiveFiniteFloat
+    """
+    The price its decision saw (TradeSignal.price_at_signal), which its limit lies at most trading.limit_offset_pct past
+    (LimitPriceRule): the market's price where the mock account fills it, and what a broker's fill compares with.
+    """
     time_in_force: TimeInForce
 
     status: OrderStatus = OrderStatus.PENDING

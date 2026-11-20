@@ -25,8 +25,8 @@ class OrderPreparation:
     may not take now. BrokerAccessRule reads what the broker reports of itself (its link) against the run's choice and
     its workflow (a ranking follow orders on a real broker's simulation server only), and
     for a real broker one read of the site's ordering switch (`ordering_switch`: the settings files on disk, not the
-    settings this run started on), the user as saved now (`user_id`, the Pipeline's user) and the day's BUYs on it in
-    the journal.
+    settings this run started on), the user as saved now (`user_id`, the Pipeline's user), the day's BUYs on it in the
+    journal and `equity`, the account as the run valued it before its first decision, which its BUY limits follow.
     The order is saved PENDING before those BUYs are read, so every order that may reach the broker, this one and one
     of another process of the same owner at the same moment included, is in the total. A decision that already has an
     order in this run gets none, so a workflow can send stop-loss SELLs early and the rest at the end. An order whose
@@ -54,7 +54,7 @@ class OrderPreparation:
         self._access_rule = config.broker_access_rule()
         self._logger = logger
 
-    async def execute(self, signal: TradeSignal, orders: Sequence[Order], stats: SystemStats) -> Order | None:
+    async def execute(self, signal: TradeSignal, orders: Sequence[Order], equity: float | None, stats: SystemStats) -> Order | None:
         if signal.action == TradeAction.HOLD or signal.decision_id in {order.decision_id for order in orders}:
             return None
 
@@ -68,7 +68,7 @@ class OrderPreparation:
             await self._journal.save_order(order)
             buys = await self._journal.buy_orders(link.broker, day_start) if link.broker.real and order.status.is_open else []
             ordering = await self._ordering_switch.read() if link.broker.real else None
-            refusal = self._access_rule.apply(order, stats.workflow, stats.execution_provider, link, user, ordering, buys)
+            refusal = self._access_rule.apply(order, stats.workflow, stats.execution_provider, link, user, ordering, buys, equity)
 
             if order.status.is_open and refusal is not None:
                 order.reject(*refusal, now=now)

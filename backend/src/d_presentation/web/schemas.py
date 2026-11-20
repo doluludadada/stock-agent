@@ -452,11 +452,17 @@ class BrokerResponse(BaseModel):
     server: ShioajiServer | None
     """A real broker's server (shioaji.server). None on the mock account."""
 
-    max_order_value: float | None
-    """A real broker's most NT$ per BUY at its limit price (trading.max_order_value). None on the mock account."""
+    max_order_equity_pct: float | None
+    """
+    A real broker's most per BUY at its limit price, as a share of the account's equity as the run values it
+    (trading.max_order_equity_pct). None on the mock account.
+    """
 
-    max_daily_buy_value: float | None
-    """A real broker's most NT$ of BUYs per Taiwan calendar day (trading.max_daily_buy_value). None on the mock account."""
+    max_daily_buy_equity_pct: float | None
+    """
+    A real broker's most BUYs per Taiwan calendar day at their limit prices, as a share of the account's equity as each
+    run values it (trading.max_daily_buy_equity_pct). None on the mock account.
+    """
 
 
 class BrokerageStatementResponse(Response):

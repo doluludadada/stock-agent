@@ -355,7 +355,7 @@ class Pipeline:
                 status.account, status.held_stocks, status.stocks, status.stale_stock_ids, status.stats
             )
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -371,7 +371,7 @@ class Pipeline:
                 status.survivors, status.account, equity, status.risk_blocked_stock_ids, status.stale_stock_ids, status.stats
             )
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -399,7 +399,7 @@ class Pipeline:
                 status.account, status.held_stocks, status.stocks, status.stale_stock_ids, status.stats
             )
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -417,7 +417,7 @@ class Pipeline:
                 status.survivors, status.account, equity, status.risk_blocked_stock_ids, status.stale_stock_ids, status.stats
             )
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -467,11 +467,11 @@ class Pipeline:
             await self.order_settlement.execute(status.stats)
             status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.manual_stocks, status.stale_stock_ids, status.stats)
-            status.signals, status.manual_buy_refusal = await self.manual_signal.execute(
+            status.equity, status.signals, status.manual_buy_refusal = await self.manual_signal.execute(
                 stock, quantity, status.account, status.stocks, status.stats
             )
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -508,7 +508,7 @@ class Pipeline:
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.manual_stocks, status.stale_stock_ids, status.stats)
             status.signals = await self.follow_signals.execute(status.followable_signals, status.stocks, status.account, status.stats)
             for signal in status.signals:
-                if order := await self.mock_order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.mock_order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.mock_order_execution.execute(order, status.stats)
                     status.account = await self.mock_order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -535,24 +535,28 @@ class Pipeline:
         at an equal weight of the account (RankingFollowRule), each priced as this site prices an order now, like a
         follow of a run; every holding is priced too, since the equal weight is a share of the account's value. A
         ranked stock the account already holds is left as it is, so a second follow of the same decision sends nothing
-        but what the first could not fill. The follow account is asked first (RankingFollowSchedule): a run on another
-        broker than it fails before anything is read (FollowAccountChanged), and a follow account the site does not
+        but what the first could not fill, except by the follows after a switch of the active formula until one of them
+        finished the decision, which also top each one short of its equal weight up to it (TopUpRule). The follow
+        account is asked first
+        (RankingFollowSchedule): a run on another broker than it fails before anything is read (FollowAccountChanged),
+        and a follow account the site does not
         offer the user now, or a market phase no order is placed in, ends the run with nothing sent, on this account
         and on any other. After its orders it looks at the account once more, so its record says how many stocks it
         left to trade: the schedule follows the decision again until a follow left none. Every step that gates or
         sends an order holds this Pipeline's broker (account_loader, order_preparation, order_execution,
         order_outcome), and on SinoPac the order gates refuse each order on a login that is not on the simulation
-        server, so no ranking follow orders with real money. On a real broker each BUY is sized inside
-        trading.max_order_value, one the day's limit refuses is left to a later follow, and so is one the account's
-        cash does not pay for until the follow's sales settle (RankingFollowRule). RankingUnavailable while the history
-        holds no decision session.
+        server, so no ranking follow orders with real money. On a real broker the BUYs are planned inside the BUY
+        limits that follow the account's equity as the run valued it (trading.max_order_equity_pct,
+        trading.max_daily_buy_equity_pct) and the broker's own trading limit, best first, and a BUY they or the account's
+        cash leave no room for until the follow's sales settle waits for a later follow (RankingFollowRule).
+        RankingUnavailable while the history holds no decision session.
         """
         async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id, scheduled=scheduled) as stats:
             status = PipelineStatus(stats=stats)
-            account, _, _ = await self.ranking_follow_schedule.execute(user)
+            account, _, follows = await self.ranking_follow_schedule.execute(user)
             history = await self.ranking_history_loader.execute()
             ranking = await self.latest_ranking.execute(history)
-            holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(account, ranking, status.stats)
+            holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(account, ranking, follows, status.stats)
 
             if account.refusal is not None or status.follow_refusal is not None:
                 return status
@@ -563,14 +567,16 @@ class Pipeline:
             traded = [*status.held_stocks, *status.manual_stocks]
             await self.data_collector.execute(traded, 1, status.stats)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(traded, status.stale_stock_ids, status.stats)
-            status.signals = await self.ranking_follow_signals.execute(ranking, status.stocks, status.account, status.stats)
+            status.equity, status.signals = await self.ranking_follow_signals.execute(
+                ranking, status.stocks, status.account, status.stats
+            )
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
             status.orders = await self.order_settlement.execute(status.stats, status.orders)
-            await self.ranking_follow_candidates.execute(account, ranking, status.stats)
+            await self.ranking_follow_candidates.execute(account, ranking, follows, status.stats, status.stocks, status.equity)
 
         return status
 
@@ -588,7 +594,7 @@ class Pipeline:
         account, schedule, follows = await self.ranking_follow_schedule.execute(user)
         history = await self.ranking_history_loader.execute()
         ranking = await self.latest_ranking.execute(history)
-        holdings, refusal = await self.ranking_follow_candidates.execute(account, ranking)
+        holdings, refusal = await self.ranking_follow_candidates.execute(account, ranking, follows)
         settings = RankingFollowSettings(account, schedule, follows)
 
         if not account.measured:

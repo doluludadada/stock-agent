@@ -13,10 +13,13 @@ export type Broker = Schemas['ExecutionProvider']
 /** The server a real broker's login is on: SinoPac's Simulation, no real money, or Production, real money. */
 export type Server = Schemas['ShioajiServer']
 
-/** A broker the user may choose now. A real one carries what a confirmation names: its server and its BUY limits. */
+/**
+ * A broker the user may choose now. A real one carries what a confirmation names: its server and its BUY limits, shares
+ * of the account's equity as each run values it: one BUY's, and the day's BUYs'.
+ */
 export type BrokerOffer =
   | { broker: 'mock' }
-  | { broker: Exclude<Broker, 'mock'>; server: Server; max_order_value: number; max_daily_buy_value: number }
+  | { broker: Exclude<Broker, 'mock'>; server: Server; max_order_equity_pct: number; max_daily_buy_equity_pct: number }
 
 /**
  * The query of a start that orders on `offer`: the broker, and for a real one the server its confirmation showed. The
@@ -40,10 +43,10 @@ export function chosenOffer(offers: readonly BrokerOffer[], chosen: Broker): Bro
 }
 
 /** A real broker sent without its server or its limits is left out: no confirmation could name them. */
-function offerOf({ broker, server, max_order_value, max_daily_buy_value }: Schemas['BrokerResponse']): BrokerOffer[] {
+function offerOf({ broker, server, max_order_equity_pct, max_daily_buy_equity_pct }: Schemas['BrokerResponse']): BrokerOffer[] {
   if (broker === 'mock') return [{ broker }]
-  if (server === null || max_order_value === null || max_daily_buy_value === null) return []
-  return [{ broker, server, max_order_value, max_daily_buy_value }]
+  if (server === null || max_order_equity_pct === null || max_daily_buy_equity_pct === null) return []
+  return [{ broker, server, max_order_equity_pct, max_daily_buy_equity_pct }]
 }
 
 /**

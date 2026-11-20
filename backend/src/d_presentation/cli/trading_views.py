@@ -51,11 +51,11 @@ def ordering_pipeline(runtime: Runtime, session: terminal.CliSession) -> Pipelin
 
     shioaji = runtime.config.shioaji.server
     server = f"{shioaji.label} (no real money)" if shioaji.simulation else f"{shioaji.label.upper()}: REAL ACCOUNT, REAL MONEY"
-    order_limit, daily_limit = runtime.config.trading.max_order_value, runtime.config.trading.max_daily_buy_value
+    order_limit, daily_limit = runtime.config.trading.max_order_equity_pct, runtime.config.trading.max_daily_buy_equity_pct
     terminal.console.print(
         Panel(
             f"{' or '.join(broker.label for broker in brokers[1:])}: {server}\n"
-            f"Each BUY at most {order_limit:,.0f} NT$, at most {daily_limit:,.0f} NT$ of BUYs a day.",
+            f"Each BUY at most {order_limit:.0%} of the account's equity, at most {daily_limit:.0%} of it in BUYs a day.",
             title="ORDER ON",
             style="bold yellow" if shioaji.simulation else "bold red",
         )

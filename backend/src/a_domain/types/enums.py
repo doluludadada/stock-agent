@@ -239,10 +239,13 @@ class RejectReason(StrEnum):
     """
 
     ORDER_VALUE_LIMIT = auto()
-    """A real broker's BUY costs more than trading.max_order_value at its limit price, or has no limit price to value."""
+    """
+    A real broker's BUY costs more at its limit price than trading.max_order_equity_pct of the account's equity, or has
+    no limit price or no equity to value against.
+    """
 
     DAILY_BUY_LIMIT = auto()
-    """A real broker's BUY would take the day's BUYs on it past trading.max_daily_buy_value."""
+    """A real broker's BUY would take the day's BUYs on it past trading.max_daily_buy_equity_pct of the account's equity."""
 
     UNSETTLED_BUY = auto()
     """

@@ -15,7 +15,7 @@ import pytest
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType
 from shioaji.error import TimeoutError as ShioajiTimeoutError
 from shioaji.order import Order as BrokerOrder
-from support.fake_shioaji import DONE, FakeShioaji, Report
+from support.fake_shioaji import DONE, FakeContracts, FakeShioaji, FakeStocks, Report, stock
 from support.fakes import FakeTradingJournal
 from support.harness import ADMINISTRATOR, MARKET_OPEN, CliHarness, build_harness, harness_config, runtime_for
 from support.settings import sinopac_setup
@@ -44,8 +44,11 @@ from d_presentation.web.scheduled_follows import settle_users_orders
 
 pytestmark = pytest.mark.asyncio
 
-DAILY_LIMIT = 150_000.0
-"""trading.max_daily_buy_value here: an earlier BUY of 100,000 counted in full leaves no room for a second."""
+DAILY_LIMIT = 0.15
+"""
+trading.max_daily_buy_equity_pct here: 150,000 of the simulation account's 1,000,000, so an earlier BUY of 100,000 counted
+in full leaves no room for a second, 102,000 at its limit.
+"""
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +62,7 @@ def no_waits(monkeypatch: pytest.MonkeyPatch) -> None:
 def sinopac_site(client: FakeShioaji) -> CliHarness:
     """An administrator's site whose SinoPac is the real adapter over `client` on the simulation server, at Monday 10:00."""
     config = sinopac_setup(harness_config(), ShioajiServer.SIMULATION)
-    config = config.model_copy(update={"trading": config.trading.model_copy(update={"max_daily_buy_value": DAILY_LIMIT})})
+    config = config.model_copy(update={"trading": config.trading.model_copy(update={"max_daily_buy_equity_pct": DAILY_LIMIT})})
     harness = build_harness(config=config, sinopac=True)
     client.stock_account = client.account_at_login
     login = config.shioaji.login()
@@ -80,10 +83,13 @@ def unconfirmed_buy(
     sent_at: datetime = MARKET_OPEN - timedelta(minutes=30),
     journal: ITradingJournal | None = None,
     submitted: bool = False,
+    pending_at: float | None = None,
 ) -> Order:
     """
     A SinoPac BUY of 1000 at 100 of an earlier manual BUY run, the administrator's unless another `journal` holds it,
-    whose answer was lost; `submitted`, one whose answer came, of a run whose process stopped before its end.
+    whose answer was lost; `submitted`, one whose answer came, of a run whose process stopped before its end;
+    `pending_at`, one still PENDING at that limit, as its journal row was saved before the adapter moved the limit
+    into the day's price band and sent it, of a run whose process stopped before it saved the answer.
     """
     run = SystemStats(workflow=Workflow.MANUAL_BUY, execution_provider=ExecutionProvider.SHIOAJI, start_time=sent_at)
     run.end_time = sent_at + timedelta(minutes=1) if ended else None
@@ -94,14 +100,15 @@ def unconfirmed_buy(
         action=TradeAction.BUY,
         order_type=OrderType.LIMIT,
         quantity=1000,
-        limit_price=100.0,
+        limit_price=pending_at or 100.0,
+        price_at_signal=100.0,
         time_in_force=TimeInForce.IOC,
         created_at=sent_at,
         updated_at=sent_at,
     )
     if submitted:
         order.submit(now=sent_at)
-    else:
+    elif pending_at is None:
         order.leave_unconfirmed(
             f"unconfirmed at Shioaji: Common 1000 shares tagged {order.id.hex[:5]}0, which Shioaji does not list", now=sent_at
         )
@@ -307,6 +314,27 @@ async def test_the_timer_ends_a_sinopac_run_an_earlier_process_left_and_settles_
     assert (ended.end_time, ended.failure) == (harness.clock.now(), "the process that ran it stopped before the run ended")
     assert (journaled(harness, left).status, journaled(harness, left).filled_quantity) == (OrderStatus.FILLED, 1000)
     assert (journal.runs[running.run_id].end_time, journaled(harness, running).status) == (None, OrderStatus.SUBMITTED)
+
+
+async def test_a_part_sent_at_the_days_limit_up_is_settled_also_after_its_process_stopped_before_it_saved_the_send() -> None:
+    """
+    Decided at 100, the BUY's limit is 102, past the day's limit-up of 100, so the adapter sent it at 100. The process
+    stopped before it saved that, and its journal row still says 102 and PENDING: settlement finds the part by the
+    limit the band allowed, as it was sent.
+    """
+    client = FakeShioaji()
+    harness = sinopac_site(client)
+    started = harness.dependencies.process_started
+    session = harness.clock.to_trading_date(started - timedelta(minutes=5))
+    client.Contracts = FakeContracts(FakeStocks({"2330": stock("2330", 100 / 1.1, session)}))
+    left = unconfirmed_buy(harness, ended=False, sent_at=started - timedelta(minutes=5), pending_at=102.0)
+    listed_at_sinopac(client, left, Report(Status.Filled, ((100.0, 1),)))
+
+    await settle_users_orders(harness.runtime)
+
+    settled = journaled(harness, left)
+    assert client.Contracts.Stocks["2330"].limit_up == 100.0
+    assert (settled.status, settled.filled_quantity, settled.limit_price) == (OrderStatus.FILLED, 1000, 100.0)
 
 
 async def test_the_timer_settles_the_sinopac_orders_of_a_user_who_may_no_longer_hold_sinopac_in_that_users_journal_alone() -> None:

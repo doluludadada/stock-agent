@@ -189,24 +189,43 @@ class RuntimeSwitch:
             self.publish(opened)
             return SettingsReloaded(self.running, running)
 
-    async def log_in_again(self) -> None:
+    async def log_in_again(self) -> bool:
         """
-        The Web API timer's new Shioaji login: while the current runtime's login is down, because it failed when the
-        runtime opened or Shioaji reported its session down since, a runtime opened from the settings files as a reload
-        opens one, which logs in again on a new client, becomes current. A runtime that would not open leaves the current
-        one serving, and the next interval tries again.
+        The site's new Shioaji login, at the first use of the login once it is due (Runtime.login_due): it failed when
+        the runtime opened, Shioaji reported it down or refused its token since, or it is stale, made before the market
+        day's shioaji.login_renewal_time. Each request, each CLI round and each look of the timer of the scheduled follows
+        asks it first, and while one opens the others wait on it. A runtime opened on the settings the current one runs
+        on, never on the files on disk, so a new login never switches SinoPac's server or any other setting, logs in
+        again on a new client (ShioajiQuoteProvider.connect), checks the SinoPac account on it and becomes current: the
+        next run and read use the new login, and a run under way keeps the runtime it holds, and so its client, to its
+        end. A runtime whose login did not come up, or that would not open, closes and leaves the current one serving;
+        the next login is tried shioaji.login_retry_seconds later, and a login it left running that succeeded since is
+        taken up by the next use (Runtime.login_due). True when a new runtime became current.
         """
-        async with self.lock:
-            if not self.opened[-1].runtime.login_down:
-                return
+        if not self.opened[-1].runtime.login_due:
+            return False
 
-            try:
-                opened = await self.open_candidate({}, None)
-            except InvalidSettingsError as error:
-                self.logger.warning(f"The Shioaji login is down, and a runtime to log in again would not open:\n{error}")
-                return
+        async with self.lock:
+            current = self.opened[-1].runtime
+
+            if current.shioaji is None or not current.login_due:
+                return False
+
+            timeout = current.config.api.settings_build_timeout_seconds
+            opened = await opened_within(self.opener, current.config, timeout, self.logger)
+
+            if opened is not None and (not opened.runtime.realtime_quotes or opened.runtime.login_due):
+                await opened.exit_stack.aclose()
+                opened = None
+
+            if opened is None:
+                current.shioaji.failed_at = current.market_clock.now()
+                self.logger.warning("The Shioaji login was not made again: the runtime before serves on")
+                return False
 
             self.publish(opened)
+            self.logger.info("Logged in to Shioaji again on a new client: new runs and reads use it")
+            return True
 
     async def save(
         self,
@@ -336,6 +355,28 @@ class RuntimeSwitch:
             await asyncio.gather(*(opened.closing for opened in self.opened if opened.closing), return_exceptions=True)
 
 
+async def opened_within(opener: RuntimeOpener, config: AppConfig, timeout: float, logger: ILoggingProvider) -> OpenedRuntime | None:
+    """
+    A runtime `opener` opened on `config` within `timeout` seconds, or None when it would not open, logged by the
+    error's type alone: a driver's text can carry a connection string. A cancel closes what opened and propagates.
+    """
+    stack = AsyncExitStack()
+
+    try:
+        async with asyncio.timeout(timeout):
+            runtime = await stack.enter_async_context(opener(config))
+    except BaseException as error:
+        await asyncio.shield(stack.aclose())
+
+        if not isinstance(error, Exception):
+            raise
+
+        logger.warning(f"A runtime to log in to Shioaji again would not open: {type(error).__name__}")
+        return None
+
+    return OpenedRuntime(runtime, stack)
+
+
 @asynccontextmanager
 async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerator[RuntimeSwitch]:
     """
@@ -405,14 +446,10 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
     statements, monthly revenue and TWSE news) into the archive, then, on a personal site, the exchanges' daily reports
     of the sessions its history cache lacks, then the news of the stocks users hold or watch into the article store,
     then, on the runtime's system writer, the site's own writing for the monthly ranking's top stocks
-    (write_for_system_stocks).
-    Before them, a Shioaji login that is down is made again
-    (RuntimeSwitch.log_in_again). A step never stops it on an error of its own: it logs it, goes on to the next and
+    (write_for_system_stocks). A step never stops it on an error of its own: it logs it, goes on to the next and
     tries again at the next interval. The lifespan cancels it at shutdown and waits until the step it stopped has ended.
     """
     while True:
-        await switch.log_in_again()
-
         with switch.hold() as opened:
             interval = opened.runtime.config.api.archive_interval_hours
             pipeline = opened.runtime.signed_out

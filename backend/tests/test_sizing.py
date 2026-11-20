@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from support.settings import shipped_config
 from support.trading_rules import COSTS, sizing_rule
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -41,6 +42,14 @@ def test_a_buy_from_an_off_tick_quote_is_sized_at_its_order_limit_so_the_cash_co
 
     # 1000 x 28.37 + fee 40 is exactly the cash, but the order's limit is the next tick, 28.40: 998 x 28.40 + 40 fits, 999 does not.
     assert rule.apply(account=Account(cash=28_410), equity=28_410, stock_id="2330", price=28.37, now=QUOTED_AT) == 998
+
+
+@pytest.mark.parametrize(("cash", "shares"), [(102_145, 1000), (102_144, 999)])
+def test_a_buy_is_sized_at_its_marketable_limit_so_the_cash_pays_for_any_fill_up_to_it(cash: float, shares: int) -> None:
+    """The shipped limit lies 2% above the quote: 1000 shares of a stock quoted at 100 take 102,000 and a fee of 145."""
+    rule = shipped_config().sizing_rule()
+
+    assert rule.apply(account=Account(cash=cash), equity=10_000_000, stock_id="2330", price=100, now=QUOTED_AT) == shares
 
 
 def test_equity_marks_each_position_at_its_quote_else_its_last_daily_close_else_its_average_cost() -> None:

@@ -33,7 +33,7 @@ class SettingsProblem:
     """None for a problem no settings file sets: a value from .env, a built-in strategy's JSON, the database or broker."""
 
     path: str | None = None
-    """The setting's dotted path, such as trading.max_order_value."""
+    """The setting's dotted path, such as trading.max_order_equity_pct."""
 
     line: Annotated[int, Field(ge=1)] | None = None
     column: Annotated[int, Field(ge=1)] | None = None
@@ -48,7 +48,7 @@ class SettingsProblem:
 
     @override
     def __str__(self) -> str:
-        """`appsetting.yaml line 207, column 15, trading.max_order_value: Input should be ...`: how startup and the CLI print it."""
+        """`appsetting.yaml line 207, column 15, trading.limit_offset_pct: Input should be ...`: how startup and the CLI print it."""
         place = f"{self.file.file_name} line {self.line}, column {self.column}" if self.file and self.line else None
         where = ", ".join(part for part in (place, self.path) if part)
         return f"{where}: {self.message}" if where else self.message

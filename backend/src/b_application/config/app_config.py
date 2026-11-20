@@ -14,7 +14,7 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.follow import FollowAccountRule, FollowScheduleRule, FollowTimeRule, RankingFollowRule
+from a_domain.rules.trading.follow import FollowAccountRule, FollowScheduleRule, FollowTimeRule, RankingFollowRule, TopUpRule
 from a_domain.rules.trading.order_rule import (
     BrokerAccessRule,
     BrokerLoginRule,
@@ -31,6 +31,7 @@ from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingR
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
+from a_domain.rules.trading.tick import LimitPriceRule
 from a_domain.types.enums import Audience, BriefKind, ExecutionProvider, Feature, SettingGroup, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
@@ -144,7 +145,7 @@ class AppConfig(BaseSettings):
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig, json_schema_extra={"operator_only": True})
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
-    trading: TradingConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    trading: TradingConfig = Field(default_factory=TradingConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     mock_trading: MockTradingConfig = Field(
         default_factory=MockTradingConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS}
     )
@@ -157,21 +158,26 @@ class AppConfig(BaseSettings):
     sources: SourcesConfig = Field(json_schema_extra={"operator_only": True})
     features: FeaturesConfig = Field(default_factory=FeaturesConfig, json_schema_extra={"group": SettingGroup.FEATURES})
 
-    @field_validator("db", mode="before")
+    @field_validator("db", "trading", mode="before")
     @classmethod
     def empty_section_is_unset(cls, section: object) -> object:
         """
-        A file without `db:`, or with a `db:` left holding nothing, as deleting its last retired setting leaves it, reads
-        like `db: {}`: every setting comes from the environment, and a refused one is named under db.
+        A file without `db:` or `trading:`, or with one left holding nothing, as deleting its last retired setting leaves
+        it, reads like `db: {}` or `trading: {}`: db's settings come from the environment, trading's from their
+        defaults, and a refused one is named under its section.
         """
         return {} if section is None else section
+
+    def limit_price_rule(self) -> LimitPriceRule:
+        """Every order's limit: the market's tick grid, at most trading.limit_offset_pct past the price its decision saw."""
+        return self.market.limit_price_rule(self.trading.limit_offset_pct)
 
     def sizing_rule(self) -> SizingRule:
         return SizingRule(
             risk_per_trade_pct=self.analysis.risk_per_trade_pct,
             stop_loss_pct=self.analysis.stop_loss_pct,
             lot_size=self.analysis.lot_size,
-            limit_price_rule=self.market.limit_price_rule(),
+            limit_price_rule=self.limit_price_rule(),
             affordable_quantity_rule=AffordableQuantityRule(cost_rule=self.market.cost_rule()),
         )
 
@@ -198,7 +204,7 @@ class AppConfig(BaseSettings):
             reason_rule=self.exit_reason_rule(),
         )
 
-        buy_cost_rule = BuyCostRule(limit_price_rule=self.market.limit_price_rule(), cost_rule=self.market.cost_rule())
+        buy_cost_rule = BuyCostRule(limit_price_rule=self.limit_price_rule(), cost_rule=self.market.cost_rule())
 
         return RunDecisionsRule(decision_rule=DecisionRule(entry_rule=entry_rule, exit_rule=exit_rule), buy_cost_rule=buy_cost_rule)
 
@@ -301,15 +307,20 @@ class AppConfig(BaseSettings):
 
     def ranking_follow_rule(self) -> RankingFollowRule:
         """
-        RankingFollowSignals' rule: the lot size, the most one BUY may cost on a real broker, the order's limit and the
-        market's fee and tax.
+        RankingFollowSignals' rule: the lot size, the BUY limits of a real broker, the order's limit, the market's fee
+        and tax, and the top-ups after a switch of the active formula.
         """
         return RankingFollowRule(
             lot_size=self.analysis.lot_size,
-            max_order_value=self.trading.max_order_value,
-            limit_price_rule=self.market.limit_price_rule(),
+            buy_limit_rule=self.buy_limit_rule(),
+            limit_price_rule=self.limit_price_rule(),
             affordable_quantity_rule=AffordableQuantityRule(cost_rule=self.market.cost_rule()),
+            top_up_rule=self.top_up_rule(),
         )
+
+    def top_up_rule(self) -> TopUpRule:
+        """The ranked stocks a follow after a switch of the active formula tops up: those short of their weight past the tolerance."""
+        return TopUpRule(tolerance=self.ranking.top_up_tolerance_pct)
 
     def follow_account_rule(self) -> FollowAccountRule:
         """The accounts the site offers a user as their follow account: each one's feature, then broker_access_rule's gate."""
@@ -324,7 +335,7 @@ class AppConfig(BaseSettings):
     def order_rule(self) -> OrderRule:
         price_rule = OrderPriceRule(pricing=self.audience.order_pricing, price_freshness=self.freshness.realtime_rule())
 
-        return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=self.market.limit_price_rule())
+        return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=self.limit_price_rule())
 
     def broker_access_rule(self) -> BrokerAccessRule:
         """
@@ -333,15 +344,21 @@ class AppConfig(BaseSettings):
         OrderPreparation reads both from the site's ordering switch at each send, and send_refusal again before each
         exchange order.
         """
-        limit_rule = BuyLimitRule(max_order_value=self.trading.max_order_value, max_daily_buy_value=self.trading.max_daily_buy_value)
-
         return BrokerAccessRule(
             brokers=self.audience.brokers & self.audience.order_pricing.brokers,
             gate_rule=RealBrokerGateRule(
                 simulation_rule=SimulationOnlyRule(), orderer_rule=RealBrokerOrdererRule(), login_rule=BrokerLoginRule()
             ),
             unsettled_rule=UnsettledBuyRule(),
-            limit_rule=limit_rule,
+            limit_rule=self.buy_limit_rule(),
+        )
+
+    def buy_limit_rule(self) -> BuyLimitRule:
+        """
+        A real broker's BUY limits, shares of the account's equity as a run values it: one BUY's, and the day's BUYs'.
+        """
+        return BuyLimitRule(
+            max_order_equity_pct=self.trading.max_order_equity_pct, max_daily_buy_equity_pct=self.trading.max_daily_buy_equity_pct
         )
 
     def registration_rule(self) -> RegistrationRule:

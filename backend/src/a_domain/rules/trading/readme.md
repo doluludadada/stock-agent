@@ -33,7 +33,7 @@ Each rule makes one decision in `apply`:
 | `cost.py`       | `TradingCostRule`         | The broker fee (with its minimum) and the transaction tax (SELL only)                      |
 |                 | `AffordableQuantityRule`  | The largest lot-aligned BUY quantity the cash pays for, fee included                       |
 | `tick.py`       | `TickSizeRule`            | The exchange tick of a price                                                               |
-|                 | `LimitPriceRule`          | An order's limit price: the decided price as a tick, up for a BUY and down for a SELL      |
+|                 | `LimitPriceRule`          | An order's limit price: at most trading.limit_offset_pct past the decided price, on the grid |
 | `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: continuous trading, quote age                            |
 |                 | `RealBrokerOrdererRule`   | Why a user may not order on a real broker: the site's ordering switch as it is at the send, then the user |
 |                 | `BrokerLoginRule`         | Why a real broker's login may not take an order now: down, or on another server than shioaji.server names on disk at the ask |

@@ -91,7 +91,7 @@ const runs: DictionaryShape<typeof en> = {
   broker: {
     label: '下單帳戶',
     server: { simulation: '{{name}}：測試環境，非真實資金', production: '{{name}}：正式環境，真實資金' },
-    limits: '每筆買進最多 NT${{order}}，每個台灣日的買進合計最多 NT${{daily}}；超過的買單會被拒絕。',
+    limits: '每筆買進最多為帳戶淨值的 {{order}}，每個台灣日的買進合計最多為帳戶淨值的 {{daily}}；超過的買單會被拒絕。',
   },
   buy: {
     button: '買進…',

@@ -41,6 +41,7 @@ function trade(id: string, overrides: Partial<Trade['order']>, run: Trade['run']
       order_type: 'limit',
       quantity: 1000,
       limit_price: 512,
+      price_at_signal: 512,
       time_in_force: 'ioc',
       status: 'filled',
       reason: null,
