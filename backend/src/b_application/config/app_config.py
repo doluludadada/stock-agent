@@ -14,7 +14,14 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.follow import FollowAccountRule, FollowScheduleRule, FollowTimeRule, RankingFollowRule, TopUpRule
+from a_domain.rules.trading.follow import (
+    FollowAccountRule,
+    FollowScheduleRule,
+    FollowTimeRule,
+    FormulaSwitchRule,
+    RankingFollowRule,
+    TopUpRule,
+)
 from a_domain.rules.trading.order_rule import (
     BrokerAccessRule,
     BrokerLoginRule,
@@ -295,12 +302,14 @@ class AppConfig(BaseSettings):
 
     def follow_schedule_rule(self) -> FollowScheduleRule:
         """
-        Where a user's scheduled ranking follow stands: the ranking's decisions, this site's order window, the times
-        offered, and the active formula, the one a follow must have finished a decision under.
+        Where a user's scheduled ranking follow stands: the ranking's decisions, this site's order window, the days a
+        switch of the active formula tops up on, the times offered, and the active formula, the one a follow must have
+        finished a decision under.
         """
         return FollowScheduleRule(
             decision_rule=self.decision_sessions_rule(),
             time_rule=self.follow_time_rule(),
+            switch_rule=FormulaSwitchRule(follow_days=self.ranking.top_up_follow_days),
             times=self.ranking.follow_times,
             formula=self.ranking.formula(),
         )

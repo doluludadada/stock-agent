@@ -79,7 +79,7 @@ async def test_a_reload_reuses_the_login_and_closing_the_last_runtime_logs_nothi
     clients: list[FakeShioaji], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config, shared, project = shioaji_test_config(tmp_path, monkeypatch), process(), switch_project(tmp_path)
-    switch = RuntimeSwitch(lambda _: open_runtime(config, shared), project, shared.logger)
+    switch = RuntimeSwitch(lambda _, replaced: open_runtime(config, shared, replaced=replaced), project, shared.logger)
     await switch.start(config)
 
     try:
@@ -101,7 +101,7 @@ async def test_a_reload_whose_startup_fails_after_the_login_leaves_it_to_the_run
         raise AccountsKeyError("Restore the original secrets/accounts.key")
 
     config, shared, project = shioaji_test_config(tmp_path, monkeypatch), process(), switch_project(tmp_path)
-    switch = RuntimeSwitch(lambda _: open_runtime(config, shared), project, shared.logger)
+    switch = RuntimeSwitch(lambda _, replaced: open_runtime(config, shared, replaced=replaced), project, shared.logger)
     await switch.start(config)
 
     try:
@@ -123,6 +123,10 @@ async def test_a_reload_whose_startup_fails_after_the_login_leaves_it_to_the_run
 async def test_a_broker_whose_check_after_the_login_fails_offers_no_sinopac_and_keeps_the_one_login(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    A key pair whose login returns no stock account still gives the site its quotes, for runs on the mock account, and
+    no SinoPac. Every later runtime reuses that one login.
+    """
     made: list[FakeShioaji] = []
 
     def client(simulation: bool) -> FakeShioaji:
@@ -158,7 +162,7 @@ async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp
 
     for database in databases:
         await database.init_db()
-        runtimes.append(await build_provider_dependencies(config, database, shared, clock, KEY, None, None))
+        runtimes.append(await build_provider_dependencies(config, database, shared, clock, KEY, None, None, None))
 
     failures = []
 
@@ -194,7 +198,7 @@ async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp
     assert failures == []
 
 
-async def test_a_login_shioaji_reports_down_answers_no_realtime_quote_until_a_runtime_logs_in_again_on_a_new_client(
+async def test_a_login_shioaji_reports_down_answers_no_realtime_quote_until_a_renewals_runtime_logs_in_again_on_a_new_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every client stays referenced and none is logged out (ProcessState.shioaji_connections)."""
@@ -216,7 +220,7 @@ async def test_a_login_shioaji_reports_down_answers_no_realtime_quote_until_a_ru
         after_down = first.realtime_quotes
         del dead
 
-        async with open_runtime(config, shared) as second:
+        async with open_runtime(config, shared, replaced=first.shioaji_client) as second:
             gc.collect()
             clients = [fake for ref in made if (fake := ref()) is not None]
             clients[0].session_down()
@@ -232,7 +236,7 @@ async def test_the_web_apis_timer_logs_in_again_once_shioaji_reported_the_login_
     config = shioaji_test_config(tmp_path, monkeypatch, SystemEnvironment.DEV)
     logger = RecordingLogger()
     shared = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
-    switch = RuntimeSwitch(lambda _: open_runtime(config, shared), get_project_root(), logger)
+    switch = RuntimeSwitch(lambda _, replaced: open_runtime(config, shared, replaced=replaced), get_project_root(), logger)
     await switch.start(config)
 
     try:
@@ -302,7 +306,9 @@ async def test_a_switch_of_the_server_logs_in_there_once_and_a_switch_back_reuse
     clients: list[FakeShioaji], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     configs, shared, project = on_both_servers(tmp_path, monkeypatch), process(), switch_project(tmp_path)
-    switch = RuntimeSwitch(lambda candidate: open_runtime(configs[candidate.shioaji.server], shared), project, shared.logger)
+    switch = RuntimeSwitch(
+        lambda candidate, replaced: open_runtime(configs[candidate.shioaji.server], shared, replaced=replaced), project, shared.logger
+    )
     await switch.start(configs[ShioajiServer.SIMULATION])
 
     try:
@@ -338,7 +344,9 @@ async def test_a_refused_switch_logs_nothing_out_and_a_later_runtime_on_its_serv
         raise InvalidSettingsError([SettingsProblem(message="no administrator could sign in")])
 
     configs, shared, project = on_both_servers(tmp_path, monkeypatch), process(), switch_project(tmp_path)
-    switch = RuntimeSwitch(lambda candidate: open_runtime(configs[candidate.shioaji.server], shared), project, shared.logger)
+    switch = RuntimeSwitch(
+        lambda candidate, replaced: open_runtime(configs[candidate.shioaji.server], shared, replaced=replaced), project, shared.logger
+    )
     await switch.start(configs[ShioajiServer.SIMULATION])
 
     try:

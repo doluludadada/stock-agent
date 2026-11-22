@@ -11,7 +11,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import SecretStr
 
@@ -34,7 +34,14 @@ from b_application.config.settings_loader import (
 from b_application.pipeline import Pipeline
 from d_presentation.dependencies import STARTUP_REFUSALS, Runtime, create_process_state, open_runtime
 
-type RuntimeOpener = Callable[[AppConfig], AbstractAsyncContextManager[Runtime]]
+if TYPE_CHECKING:
+    from shioaji import Shioaji
+
+type RuntimeOpener = Callable[[AppConfig, Shioaji | None], AbstractAsyncContextManager[Runtime]]
+"""
+Opens a runtime on the settings. The client is the one whose login a renewal replaces, which the runtime logs in past;
+None opens on any login that is up and makes no login but the connection's first (ShioajiQuoteProvider.connect).
+"""
 
 
 @dataclass(eq=False, slots=True)
@@ -130,8 +137,10 @@ class RuntimeSwitch:
     The runtimes this process has open, oldest first; the last is current. New requests, runs and CLI options hold the
     current one. A reload opens a whole new runtime from the settings files first (the startup itself, the database and
     the broker login included), and only when it started appends it and retires the one before, which closes once
-    nothing holds it. One lock serializes the reloads; taking a hold never waits for it. It also keeps the turns of
-    the stocks whose brief is being written, which outlive any one runtime.
+    nothing holds it. One lock serializes the reloads, the saves and the renewals of the Shioaji login; taking a hold
+    never waits for it, and no request takes it for a login: the timer of the scheduled follows and the CLI's rounds
+    renew the login (log_in_again). It also keeps the turns of the stocks whose brief is being written, which outlive
+    any one runtime.
     """
 
     def __init__(self, opener: RuntimeOpener, project_root: Path, logger: ILoggingProvider) -> None:
@@ -146,7 +155,7 @@ class RuntimeSwitch:
     async def start(self, config: AppConfig) -> None:
         """Opens the first runtime, as startup always has: a refusal propagates as raised, and the process exits on it."""
         stack = AsyncExitStack()
-        runtime = await stack.enter_async_context(self.opener(config))
+        runtime = await stack.enter_async_context(self.opener(config, None))
         runtime.become_current()
         self.opened.append(OpenedRuntime(runtime, stack))
 
@@ -191,16 +200,16 @@ class RuntimeSwitch:
 
     async def log_in_again(self) -> bool:
         """
-        The site's new Shioaji login, at the first use of the login once it is due (Runtime.login_due): it failed when
-        the runtime opened, Shioaji reported it down or refused its token since, or it is stale, made before the market
-        day's shioaji.login_renewal_time. Each request, each CLI round and each look of the timer of the scheduled follows
-        asks it first, and while one opens the others wait on it. A runtime opened on the settings the current one runs
-        on, never on the files on disk, so a new login never switches SinoPac's server or any other setting, logs in
-        again on a new client (ShioajiQuoteProvider.connect), checks the SinoPac account on it and becomes current: the
-        next run and read use the new login, and a run under way keeps the runtime it holds, and so its client, to its
-        end. A runtime whose login did not come up, or that would not open, closes and leaves the current one serving;
-        the next login is tried shioaji.login_retry_seconds later, and a login it left running that succeeded since is
-        taken up by the next use (Runtime.login_due). True when a new runtime became current.
+        The renewal of the site's Shioaji login, by its one caller per process: each look of the timer of the scheduled
+        follows on the Web API, and each CLI round, never a request. Once it is due (Runtime.login_due: the login failed
+        or went down, the latest is on another client, or it is stale, made before the market day's
+        shioaji.login_renewal_time, and not within the wait after a failed one), a runtime opens on the settings the
+        current one runs on, never on the files on disk, so a new login never switches SinoPac's server or any other
+        setting, and logs in past the current one's client on a new client (ShioajiQuoteProvider.connect). True when it
+        became current, which it does only when it serves no less (serves_no_less): the next run and read use the new
+        login, and a run under way keeps its runtime, and so its client, to its end. Otherwise it closes and the current
+        one serves on; one whose login came up without the SinoPac it needed counts as a failed login. A login that
+        outlasts api.settings_build_timeout_seconds goes on, counts as no failure, and the next look takes it up.
         """
         if not self.opened[-1].runtime.login_due:
             return False
@@ -212,20 +221,25 @@ class RuntimeSwitch:
                 return False
 
             timeout = current.config.api.settings_build_timeout_seconds
-            opened = await opened_within(self.opener, current.config, timeout, self.logger)
-
-            if opened is not None and (not opened.runtime.realtime_quotes or opened.runtime.login_due):
-                await opened.exit_stack.aclose()
-                opened = None
+            opened = await opened_within(self.opener, current.config, current.shioaji_client, timeout, self.logger)
 
             if opened is None:
-                current.shioaji.failed_at = current.market_clock.now()
                 self.logger.warning("The Shioaji login was not made again: the runtime before serves on")
                 return False
 
-            self.publish(opened)
-            self.logger.info("Logged in to Shioaji again on a new client: new runs and reads use it")
-            return True
+            came_up = opened.runtime.realtime_quotes
+            if serves_no_less(opened.runtime, current):
+                self.publish(opened)
+                self.logger.info("Logged in to Shioaji again on a new client: new runs and reads use it")
+                return True
+
+            await opened.exit_stack.aclose()
+
+            if came_up:
+                current.shioaji.failed(current.market_clock.now())
+
+            self.logger.warning("The Shioaji login was not made again: the runtime before serves on")
+            return False
 
     async def save(
         self,
@@ -322,7 +336,7 @@ class RuntimeSwitch:
             async with asyncio.timeout(timeout):
                 unsettled = await current.users_orders.awaiting_settlement(ExecutionProvider.SHIOAJI)
                 config = startup_settings(self.project_root, candidates, current.config, unsettled=unsettled)
-                runtime = await stack.enter_async_context(self.opener(config))
+                runtime = await stack.enter_async_context(self.opener(config, None))
                 await runtime.signed_out.confirm_editor_access(await current.signed_out.load_sign_in_options(), administrator)
         except BaseException as error:
             await asyncio.shield(stack.aclose())
@@ -355,16 +369,31 @@ class RuntimeSwitch:
             await asyncio.gather(*(opened.closing for opened in self.opened if opened.closing), return_exceptions=True)
 
 
-async def opened_within(opener: RuntimeOpener, config: AppConfig, timeout: float, logger: ILoggingProvider) -> OpenedRuntime | None:
+def serves_no_less(renewed: Runtime, current: Runtime) -> bool:
     """
-    A runtime `opener` opened on `config` within `timeout` seconds, or None when it would not open, logged by the
-    error's type alone: a driver's text can carry a connection string. A cancel closes what opened and propagates.
+    Whether a renewal's runtime serves no less than the current one, so it may become current: it has realtime quotes,
+    and SinoPac where the site offers it, unless the current one has no SinoPac to order on either: none, as on a site
+    whose account check always fails, such as the CA certificate's activation on production, or one whose own client
+    Shioaji reported down. So such a site still takes its renewals, and quotes alone are better than none.
+    """
+    return renewed.realtime_quotes and (
+        renewed.real_broker is not None or current.real_broker is None or not current.real_broker.link().up
+    )
+
+
+async def opened_within(
+    opener: RuntimeOpener, config: AppConfig, replaced: Shioaji | None, timeout: float, logger: ILoggingProvider
+) -> OpenedRuntime | None:
+    """
+    A runtime `opener` opened on `config` past the client `replaced` within `timeout` seconds, or None when it would not open,
+    logged by the error's type alone: a driver's text can carry a connection string. A cancel closes what opened and
+    propagates.
     """
     stack = AsyncExitStack()
 
     try:
         async with asyncio.timeout(timeout):
-            runtime = await stack.enter_async_context(opener(config))
+            runtime = await stack.enter_async_context(opener(config, replaced))
     except BaseException as error:
         await asyncio.shield(stack.aclose())
 
@@ -391,7 +420,7 @@ async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerato
     for notice in [*settings_notices(root), *production_notice(config)]:
         process.logger.warning(notice)
 
-    switch = RuntimeSwitch(lambda candidate: open_runtime(candidate, process), root, process.logger)
+    switch = RuntimeSwitch(lambda candidate, replaced: open_runtime(candidate, process, replaced=replaced), root, process.logger)
     await switch.start(config)
 
     try:

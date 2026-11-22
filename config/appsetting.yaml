@@ -81,15 +81,21 @@ ranking:
   # settings page switches it, and the switch applies at once. After a switch an account's follows also buy each ranked
   # stock it holds up to its equal weight, so a switch from 20 stocks to 10 does not leave half the account in cash. A
   # follow that could not buy a top-up yet (on SinoPac a sale pays two sessions later) leaves the decision open, and
-  # the next session's follow buys it with the cash settled since; once one left nothing to trade, later follows leave
-  # a held stock as it is. The research of 2026-11-19 found 10 stocks earned more than 20 at a NT$100,000 start on
-  # both periods it tested, in part by paying the NT$20 fee floor half as often.
+  # the next session's follow buys it with the cash settled since, for top_up_follow_days days; once one left nothing to
+  # trade or those days passed, later follows leave a held stock as it is. The research of 2026-11-19 found 10 stocks
+  # earned more than 20 at a NT$100,000 start on both periods it tested, in part by paying the NT$20 fee floor half as
+  # often.
   active_formula: revenue_and_high_top10
   # How far under its equal weight, as a share of it, a ranked stock the account holds may be worth before a follow
   # after a switch buys it up to the weight. Each BUY is sized at its limit, up to trading.limit_offset_pct above the
   # price, so the mock account keeps about that much of each weight as cash; without this a follow would buy a few
   # shares every session at the NT$20 fee floor. 0 to 1.
   top_up_tolerance_pct: 0.1
+  # On how many days after a switch the follows top up, counted by the days a follow under the new formula took the
+  # decision and ended without a failure, the first included. SinoPac pays a sale two sessions later, so the fourth
+  # day's follow has the cash of the switch's sales. A top-up none of them could buy (no cash to spare, a gap under
+  # one share with the fee) is left, and the next follow finishes the decision. Only an operator sets it. 1 to 20.
+  top_up_follow_days: 4
   # The formulas the ranking can be made by. Each ranks its factors among its universe's stocks and holds the `top` best
   # sums of ranks in equal weights. Adding one is an entry here, of these factors:
   #   revenue_acceleration  the mean revenue of the latest short_months over that of the latest long_months
@@ -507,13 +513,17 @@ shioaji:
   # Seconds, at most 30, the broker may take to settle a cancel and the reads after it. Past them the order is recorded
   # unconfirmed, and SinoPac's record of the day settles it later. compose.yml's stop_grace_period covers it.
   cancel_timeout_seconds: 15
-  # The time of each market day, Taipei, from which a login made before it is stale: the site logs in again on a new
-  # client at its first use from then on, and the timer of the scheduled follows uses it within a minute. SinoPac does
-  # not say how long a login lasts; it refused one 26 hours old. After SinoPac's nightly maintenance and past 08:00,
-  # when a login reads the day's contracts and their price bands, before the opening auction takes orders at 08:30.
+  # The time of each market day, Taipei, from which a login made before it is stale: the timer of the scheduled follows
+  # logs in again on a new client within a minute of it, and the CLI at its next round. SinoPac does not say how long a
+  # login lasts; it refused one 26 hours old. After SinoPac's nightly maintenance and past 08:00, when a login reads the
+  # day's contracts and their price bands, before the opening auction takes orders at 08:30.
   login_renewal_time: "08:15"
   # Seconds, 10 to 3600, between two logins after one failed, so a SinoPac that does not answer is not asked at once.
   login_retry_seconds: 60
+  # Seconds, 10 to 86400 and at least login_retry_seconds, of the longest wait between two logins that failed one after
+  # another: each wait is twice the one before, up to this, so a SinoPac that refuses for hours is asked every quarter
+  # of an hour, on one new client each time, not every minute.
+  login_retry_max_seconds: 900
   # The cash SinoPac's simulation account started with, all of it the owner has put in. That server reports no
   # balance, so the site figures the account's cash from this and SinoPac's records (SimulationCashRule): adding money
   # to the simulation account is raising this.

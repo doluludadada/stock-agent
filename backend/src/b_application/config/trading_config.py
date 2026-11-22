@@ -132,9 +132,10 @@ class RankingConfig(BaseModel):
     active_formula: FormulaId = Field(json_schema_extra={"names_of": "ranking.formulas"})
     """
     The formula the ranking, every stock's score, the backtest shown and a follow use now. After a switch an account's
-    follows also buy each ranked stock it holds up to its equal weight (top_up_tolerance_pct), until one of them left
-    the account nothing to trade; every later one leaves a held stock as it is (RankingFollowRule). `names_of` marks a
-    setting that chooses among the names of the entries the settings file sets at that path.
+    follows of the first top_up_follow_days days also buy each ranked stock it holds up to its equal weight
+    (top_up_tolerance_pct), until one of them left the account nothing to trade; every later one leaves a held stock as
+    it is (RankingFollowRule, FormulaSwitchRule). `names_of` marks a setting that chooses among the names of the
+    entries the settings file sets at that path.
     """
 
     top_up_tolerance_pct: float = Field(
@@ -145,6 +146,15 @@ class RankingConfig(BaseModel):
     follow after a switch of active_formula buys it up to the weight (TopUpRule). A follow sizes each BUY at its limit,
     up to trading.limit_offset_pct above the price it fills at, so the mock account keeps about that share of each
     weight as cash: without the tolerance every session's follow would buy a few more shares at the minimum fee.
+    """
+
+    top_up_follow_days: int = Field(default=4, ge=1, le=20, json_schema_extra={"operator_only": True})
+    """
+    On how many days the follows after a switch of active_formula top up the ranked stocks the account holds, counted
+    by the days a follow of the account took a decision under the new formula and ended without a failure, the first
+    included (FormulaSwitchRule). SinoPac pays a sale two sessions after it, so the fourth day's follow has the cash of
+    the switch's sales even when the payment lands after the third day's follow. A top-up none of them could buy is
+    left: the next follow tops up nothing and finishes the decision.
     """
 
     evidence_min_traded_value: float = Field(
@@ -446,10 +456,11 @@ class ShioajiConfig(BaseSettings):
 
     login_renewal_time: time = Field(default=time(8, 15), json_schema_extra={"operator_only": True})
     """
-    The time of each market day, in Taipei, from which a login made before it is stale: the first use of the site's
-    login at or after it logs in again on a new client (RuntimeSwitch.log_in_again), and the Web API's timer of the
-    scheduled follows makes that use within api.follow_schedule_poll_seconds of it. SinoPac does not say how long a
-    login lasts: on 2026-11-20 it refused one made 26 hours earlier (TokenError), and one 6.5 hours old still answered.
+    The time of each market day, in Taipei, from which a login made before it is stale: the renewal of the site's login
+    (RuntimeSwitch.log_in_again) logs in again on a new client at its first look at or after it, which the Web API's
+    timer of the scheduled follows makes within api.follow_schedule_poll_seconds of it, and the CLI at its next round.
+    SinoPac does not say how long a login lasts: on 2026-11-20 it refused one made 26 hours earlier (TokenError), and
+    one 6.5 hours old still answered.
     The time is after SinoPac's nightly maintenance, before the opening auction takes orders (08:30), and a quarter of
     an hour past 08:00, midnight UTC, when the SDK's cache of the contracts, kept by UTC day, turns a day old, so a login
     then reads the day's contracts and the price band each order is kept within.
@@ -459,6 +470,15 @@ class ShioajiConfig(BaseSettings):
         default=60, ge=10, le=3600, allow_inf_nan=False, json_schema_extra={"operator_only": True, "unit": SettingUnit.SECONDS}
     )
     """The least time between two logins after one failed, so a SinoPac that does not answer is not asked again at once."""
+
+    login_retry_max_seconds: float = Field(
+        default=900, ge=10, le=86400, allow_inf_nan=False, json_schema_extra={"operator_only": True, "unit": SettingUnit.SECONDS}
+    )
+    """
+    The longest wait between two logins after they failed one after another: the first waits login_retry_seconds and
+    each further one twice the wait before, up to this, so a SinoPac that refuses for hours is not asked once a minute,
+    on a new client each time. At least login_retry_seconds.
+    """
 
     simulation_initial_cash: float = Field(
         default=1_000_000,
@@ -480,6 +500,13 @@ class ShioajiConfig(BaseSettings):
     @classmethod
     def blank_is_missing(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def validate_login_retry(self) -> Self:
+        if self.login_retry_max_seconds < self.login_retry_seconds:
+            raise ValueError("login_retry_max_seconds must be at least login_retry_seconds")
+
+        return self
 
     def given(self) -> frozenset[ShioajiCredential]:
         """The Shioaji variables that are set, by name only: a refusal names them and never shows a value."""

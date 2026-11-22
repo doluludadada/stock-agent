@@ -6,7 +6,9 @@ account (test_sinopac_ranking_follow.py has SinoPac's simulation account), recor
 again for a decision a follow finished, never for a deactivated user or one the site hides the ranking or the
 account's ordering from, and never outside continuous trading or without a realtime quote. A follow that
 ordered nothing or only a part, on a holiday the clock does not know, with a stock at its limit, of a ranking that
-ranks nothing or stopped by an error, leaves the decision pending, and the page says why.
+ranks nothing or stopped by an error, leaves the decision pending, and the page says why. After a switch of the active
+formula the follows of the first ranking.top_up_follow_days days also top the held ranked stocks up, and a top-up none of
+them could buy is left: the next follow finishes the decision.
 """
 
 import asyncio
@@ -30,12 +32,14 @@ from support.harness import (
 )
 from support.ranking_site import formulas_project
 from support.web import app_of, client_at, ended, sign_in, write
-from test_ranking_follow import CLOSES, FORMULA, daily_history, site
+from test_ranking_follow import CLOSES, FORMULA, THREE, daily_history, site
 from test_ranking_formulas import CASH, ONE, falling_site
+from trading_stack import bar
 
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.account import Position
 from a_domain.model.trading.ranking_formula import RankingFormula
-from a_domain.rules.trading.follow import FollowAccount, FollowScheduleRule, FollowTimeRule
+from a_domain.rules.trading.follow import FollowAccount, FollowScheduleRule, FollowTimeRule, FormulaSwitchRule
 from a_domain.rules.trading.ranking import DecisionSessionsRule
 from a_domain.types.enums import ExecutionProvider, FeatureVisibility, OrderPricing, TradeAction, TradingPhase, UserStatus, Workflow
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -48,6 +52,7 @@ ON_MOCK = FollowAccount(broker=ExecutionProvider.MOCK, brokers=(ExecutionProvide
 RULE = FollowScheduleRule(
     decision_rule=DecisionSessionsRule(decision_day=13, deadline_day=10),
     time_rule=FollowTimeRule(pricing=OrderPricing.REALTIME_QUOTE),
+    switch_rule=FormulaSwitchRule(follow_days=4),
     times=(NINE_FIVE, time(13, 0)),
     formula=FORMULA,
 )
@@ -662,3 +667,245 @@ async def test_a_scheduled_follow_under_a_formula_that_holds_cash_sells_to_cash_
     assert (run.scheduled, run.ranking_formula, ONE.name != CASH.name) == (True, CASH, True)
     assert placed(harness) == [("1101", TradeAction.SELL), ("2317", TradeAction.SELL)]
     assert (harness.real_broker.placed, again) == ([], [])
+
+
+# ------------------------- The end of a switch's top-ups ------------------------ #
+
+
+def record(
+    broker: ExecutionProvider, started: datetime, formula: RankingFormula | None, left: int | None, failure: str | None = None
+) -> SystemStats:
+    """A ranking follow's record once it ended: the formula of the decision it took, None when it took none."""
+    return SystemStats(
+        workflow=Workflow.RANKING_FOLLOW,
+        execution_provider=broker,
+        start_time=started,
+        end_time=started + timedelta(minutes=1),
+        ranking_decided_on=date(2026, 10, 13) if formula is not None else None,
+        ranking_formula=formula,
+        ranking_open=left,
+        scheduled=True,
+        failure=failure,
+    )
+
+
+def finished_under_three(broker: ExecutionProvider) -> list[SystemStats]:
+    """A follow under THREE that left the account nothing to trade, on the Friday before the switch."""
+    return [record(broker, at(date(2026, 10, 16), 9, 5), THREE, 0)]
+
+
+def as_the_live_journal(broker: ExecutionProvider) -> list[SystemStats]:
+    """
+    The follows under the formula of 20 stocks before the switch of 2026-11-23, as SinoPac's journal holds them: none
+    left the account nothing to trade, and the last one failed on a refused token before it took the decision.
+    """
+    return [
+        record(broker, at(date(2026, 10, 14), 9, 5), THREE, 20),
+        record(broker, at(date(2026, 10, 15), 9, 5), THREE, 18),
+        record(broker, at(date(2026, 10, 15), 9, 40), THREE, 17),
+        record(broker, at(date(2026, 10, 16), 9, 5), THREE, 16),
+        record(broker, at(date(2026, 10, 16), 9, 40), None, None, failure="TokenError: 401"),
+    ]
+
+
+MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY = (date(2026, 10, day) for day in range(19, 24))
+
+
+def under(formula: RankingFormula | None, day: date, left: int | None = 1, **changes: Any) -> SystemStats:
+    """A follow of the mock account at 09:05 on `day` under `formula`, None when it took no decision."""
+    return replace(record(ExecutionProvider.MOCK, at(day, 9, 5), formula, left if formula is not None else None), **changes)
+
+
+FINISHED = under(THREE, date(2026, 10, 16), left=0)
+"""The account's last follow under THREE, the Friday before the switch, that left it nothing to trade."""
+
+
+@pytest.mark.parametrize(
+    ("follows", "day", "switched_from"),
+    [
+        pytest.param([], MONDAY, None, id="no-follow"),
+        pytest.param([under(FORMULA, date(2026, 10, 16), left=0)], MONDAY, None, id="only-under-the-active-formula"),
+        pytest.param([FINISHED], MONDAY, THREE, id="the-first-day-after-a-finished-follow-under-another"),
+        pytest.param([under(THREE, date(2026, 10, 16), left=16)], MONDAY, THREE, id="after-one-under-another-that-never-finished"),
+        pytest.param([*as_the_live_journal(ExecutionProvider.MOCK)], MONDAY, THREE, id="after-the-live-journal"),
+        pytest.param([under(FORMULA, date(2026, 10, 14), left=0), FINISHED], MONDAY, THREE, id="a-switch-back"),
+        pytest.param([replace(FINISHED, execution_provider=ExecutionProvider.SHIOAJI)], MONDAY, None, id="on-another-account"),
+        pytest.param([FINISHED, *(under(FORMULA, day) for day in (MONDAY, TUESDAY, WEDNESDAY))], THURSDAY, THREE, id="the-fourth-day"),
+        pytest.param(
+            [FINISHED, *(under(FORMULA, day) for day in (MONDAY, TUESDAY, WEDNESDAY, THURSDAY))], FRIDAY, None, id="the-fifth-day"
+        ),
+        pytest.param(
+            [FINISHED, *(under(FORMULA, day) for day in (MONDAY, MONDAY, TUESDAY, WEDNESDAY, THURSDAY))],
+            THURSDAY,
+            THREE,
+            id="two-follows-of-a-day-take-one",
+        ),
+        pytest.param(
+            [FINISHED, under(FORMULA, MONDAY), under(None, TUESDAY), under(FORMULA, WEDNESDAY), under(FORMULA, THURSDAY)],
+            FRIDAY,
+            THREE,
+            id="a-follow-that-took-no-decision-takes-no-day",
+        ),
+        pytest.param(
+            [
+                FINISHED,
+                under(FORMULA, MONDAY),
+                under(FORMULA, TUESDAY, failure="TokenError: 401"),
+                under(FORMULA, WEDNESDAY),
+                under(FORMULA, THURSDAY),
+            ],
+            FRIDAY,
+            THREE,
+            id="a-failed-follow-takes-no-day",
+        ),
+        pytest.param(
+            [
+                FINISHED,
+                under(FORMULA, MONDAY),
+                under(FORMULA, TUESDAY, end_time=None),
+                under(FORMULA, WEDNESDAY),
+                under(FORMULA, THURSDAY),
+            ],
+            FRIDAY,
+            THREE,
+            id="a-follow-that-never-ended-takes-no-day",
+        ),
+        pytest.param(
+            [FINISHED, under(FORMULA, MONDAY), under(FORMULA, THURSDAY)], date(2026, 10, 26), THREE, id="a-day-not-followed-takes-none"
+        ),
+        pytest.param([FINISHED, under(FORMULA, MONDAY, left=0)], TUESDAY, None, id="a-follow-that-left-nothing-to-trade-ends-it"),
+    ],
+)
+def test_a_follow_tops_up_after_a_switch_from_the_last_follow_under_another_formula_on_four_follow_days_until_one_finished(
+    follows: list[SystemStats], day: date, switched_from: RankingFormula | None
+) -> None:
+    """
+    The schedule's answer to whether a follow at 09:05 on `day` is one of a switch (FormulaSwitchRule), on the follows
+    of the account the schedule follows on: the formula switched from, or None. The days count those on which a follow
+    took a decision under the active formula and ended without a failure, today's included.
+    """
+    sessions = weekdays(date(2026, 10, 1), date(2026, 10, 16))
+
+    assert RULE.apply(NINE_FIVE, sessions, follows, at(day, 9, 5), TradingPhase.CONTINUOUS, ON_MOCK).switched_from == switched_from
+
+
+def quoted(harness: CliHarness, prices: dict[str, float]) -> None:
+    for stock_id, price in prices.items():
+        harness.prices.realtime[stock_id] = bar(harness.clock.now() - FRESH, price)
+
+
+async def scheduled_week(
+    harness: CliHarness, broker: ExecutionProvider, days: int, prices: dict[str, float] | None = None
+) -> tuple[list[SystemStats], tuple[Any, Any, Any]]:
+    """
+    The administrator's schedule from 09:05 on `broker`'s account, looked at once on each of `days` days from Monday,
+    weekends included, at `prices` on top of the closes: the follows it started, and where it stands the day after.
+    """
+    runs: list[SystemStats] = []
+    quoted(harness, prices or {})
+
+    async with app_of(harness) as app, client_at(app) as client:
+        await administrator(client)
+        assert (await write(client, "PUT", "/v1/rankings/follow/account", {"broker": broker.value})).status_code == 204
+        assert (await schedule(client, "09:05")).status_code == 204
+
+        for _ in range(days):
+            runs += [await finished(harness, run_id) for run_id in await look(app)]
+            await next_session(harness)
+            quoted(harness, prices or {})
+
+        return runs, await standing(client)
+
+
+PROBE = {"2330": (6000, 100.0), "2317": (8000, 50.0)}
+"""The reviewers' probe: of 1,000,000 and no cash, 2330 at 120% of its equal weight of 500,000 and 2317 at 80%."""
+
+
+@pytest.mark.parametrize(
+    ("broker", "earlier", "positions", "cash", "prices"),
+    [
+        pytest.param(ExecutionProvider.MOCK, finished_under_three, PROBE, 0.0, {}, id="the-probe-on-the-mock-account"),
+        pytest.param(ExecutionProvider.SHIOAJI, finished_under_three, PROBE, 0.0, {}, id="the-probe-on-sinopac"),
+        pytest.param(ExecutionProvider.SHIOAJI, as_the_live_journal, PROBE, 0.0, {}, id="the-probe-after-the-live-journal"),
+        pytest.param(
+            ExecutionProvider.MOCK,
+            finished_under_three,
+            {"2330": (4, 2000.0), "2317": (200, 50.0)},
+            2000.0,
+            {"2330": 2000.0},
+            id="a-gap-under-one-share",
+        ),
+    ],
+)
+async def test_after_a_switch_a_top_up_no_buy_can_make_waits_four_follow_days_and_the_fifth_follow_finishes_the_decision(
+    broker: ExecutionProvider, earlier: Any, positions: dict[str, tuple[int, float]], cash: float, prices: dict[str, float]
+) -> None:
+    """
+    The account holds both ranked stocks and one is short of its equal weight by more than the tolerance, but no BUY
+    can close the gap: in the probe the cash is gone, and with 2330 at 2,000 in an account of 20,000 one more share at
+    its limit and the fee costs more than the 2,000 it lacks. The follows of Monday to Thursday after the switch top
+    it up and leave it open; Friday's is no switch follow: it sends nothing and finishes the decision, so no follow
+    comes on the next session. On SinoPac the switch starts even when no follow under the old formula ever finished.
+    """
+    harness = site(sinopac=True)
+    account = harness.real_broker if broker.real else harness.broker
+    account.cash = cash
+    account.positions = [
+        Position(stock_id=stock_id, quantity=quantity, average_cost=price) for stock_id, (quantity, price) in positions.items()
+    ]
+    harness.journal.runs.update({run.run_id: run for run in earlier(broker)})
+
+    runs, after = await scheduled_week(harness, broker, 5, prices)
+
+    week = [(run.ranking_open, any("Not followed now" in line for line in run.execution_log)) for run in runs]
+    assert week == [(1, True)] * 4 + [(0, False)]
+    assert all(run.ranking_formula == FORMULA for run in runs)
+    assert after == (None, None, None)
+    assert harness.broker.placed == harness.real_broker.placed == []
+
+
+async def test_on_sinopac_a_switch_after_follows_that_never_finished_sells_on_monday_and_tops_up_on_tuesday() -> None:
+    """
+    As on 2026-11-23: no follow under the formula of 20 stocks ever left SinoPac's account nothing to trade, and the
+    switch still tops up. Monday's follow sells 1101, which the ranking left, and the cash the account has, none, pays
+    for neither top-up; Tuesday's buys both with the cash the sale brought, which the fake credits at once.
+    """
+    harness = site(sinopac=True)
+    harness.real_broker.cash = 0.0
+    harness.real_broker.positions = [
+        Position(stock_id="2330", quantity=2500, average_cost=100.0),
+        Position(stock_id="2317", quantity=5000, average_cost=50.0),
+        Position(stock_id="1101", quantity=10_000, average_cost=30.0),
+    ]
+    harness.journal.runs.update({run.run_id: run for run in as_the_live_journal(ExecutionProvider.SHIOAJI)})
+
+    runs, after = await scheduled_week(harness, ExecutionProvider.SHIOAJI, 2)
+
+    assert [run.ranking_open for run in runs] == [2, 0]
+    assert [(order.stock_id, order.action) for order in harness.real_broker.placed] == [
+        ("1101", TradeAction.SELL),
+        ("2330", TradeAction.BUY),
+        ("2317", TradeAction.BUY),
+    ]
+    assert after == (None, None, None)
+
+
+async def test_with_no_tolerance_the_follows_after_a_switch_top_up_on_the_mock_account_until_the_window_ends() -> None:
+    """
+    With ranking.top_up_tolerance_pct at 0 any gap counts as short, also the one a BUY sized with its fee leaves, which
+    no share fills. Monday's follow sells 1101 and tops both ranked stocks up; the follows to Thursday leave the gaps
+    open and send nothing, and Friday's finishes the decision.
+    """
+    harness = site(ranking={"top_up_tolerance_pct": 0.0})
+    harness.broker.cash = 70.0
+    harness.broker.positions = [
+        Position(stock_id="2330", quantity=3333, average_cost=100.0),
+        Position(stock_id="2317", quantity=6666, average_cost=50.0),
+        Position(stock_id="1101", quantity=11111, average_cost=30.0),
+    ]
+    harness.journal.runs.update({run.run_id: run for run in finished_under_three(ExecutionProvider.MOCK)})
+
+    runs, after = await scheduled_week(harness, ExecutionProvider.MOCK, 8)
+
+    assert [(run.ranking_open, run.orders_submitted) for run in runs] == [(2, 3), (2, 0), (2, 0), (2, 0), (0, 0)]
+    assert after == (None, None, None)

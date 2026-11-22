@@ -140,8 +140,8 @@ async def run_menu(switch: RuntimeSwitch, user: User) -> None:
     more after the choice: settings that changed while the menu waited, a Web save included, print the menu again on
     them instead. A Shioaji login that is due is made again before the menu prints (RuntimeSwitch.log_in_again), and
     for an option that may send an order once more after the choice: a login made again while the menu waited prints
-    the menu again on it, so the option runs on the new login. The user is read again before each option; menu 8's
-    strategy carries over to the next round while the settings still have it.
+    the menu again on it, so the option runs on the new login. These are the CLI's only renewals of the login. The user
+    is read again before each option; menu 8's strategy carries over to the next round while the settings still have it.
     """
     built_in_strategy_id: str | None = None
 

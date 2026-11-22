@@ -15,7 +15,7 @@ import pytest
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType
 from shioaji.error import TimeoutError as ShioajiTimeoutError
 from shioaji.order import Order as BrokerOrder
-from support.fake_shioaji import DONE, FakeContracts, FakeShioaji, FakeStocks, Report, stock
+from support.fake_shioaji import DONE, FakeContracts, FakeShioaji, FakeStocks, Report, connection_on, stock
 from support.fakes import FakeTradingJournal
 from support.harness import ADMINISTRATOR, MARKET_OPEN, CliHarness, build_harness, harness_config, runtime_for
 from support.settings import sinopac_setup
@@ -67,7 +67,7 @@ def sinopac_site(client: FakeShioaji) -> CliHarness:
     client.stock_account = client.account_at_login
     login = config.shioaji.login()
     assert login is not None
-    adapter = ShioajiExecutionProvider(ShioajiConnection(client=client, up=True), login, config, harness.clock, harness.logger)
+    adapter = ShioajiExecutionProvider(connection_on(client), client, login, config, harness.clock, harness.logger)
     dependencies = replace(harness.dependencies, real_broker=adapter)
     runtime = runtime_for(replace(harness, dependencies=dependencies), config)
     runtime.become_current()
@@ -264,7 +264,7 @@ async def test_an_order_of_an_earlier_day_fails_without_the_login_so_it_no_longe
     config = harness.runtime.config
     site_login = config.shioaji.login()
     assert site_login is not None
-    down = ShioajiExecutionProvider(ShioajiConnection(client=client, up=False), site_login, config, harness.clock, harness.logger)
+    down = ShioajiExecutionProvider(ShioajiConnection(client=client), client, site_login, config, harness.clock, harness.logger)
     dependencies = replace(harness.dependencies, real_broker=down if login == "down" else None)
     friday, today = unconfirmed_buy(harness, sent_at=MARKET_OPEN - timedelta(days=3)), unconfirmed_buy(harness)
 

@@ -62,7 +62,7 @@ async def test_each_server_starts_and_offers_sinopac_on_itself(monkeypatch, serv
     config = trading_config(server)
     validate_trading_environment(config)
 
-    quotes, broker = await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
+    quotes, broker, _ = await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
 
     assert quotes is not None and type(broker) is ShioajiExecutionProvider
     assert broker.link() == BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=server.simulation)
@@ -75,7 +75,7 @@ async def test_production_without_its_certificate_keeps_the_quotes_and_offers_no
     state = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
     config = without(trading_config(PRODUCTION), *removed)
-    quotes, broker = await connect_shioaji(config, state, TaiwanMarketClock(MarketHoursConfig()))
+    quotes, broker, _ = await connect_shioaji(config, state, TaiwanMarketClock(MarketHoursConfig()))
 
     assert quotes is not None and broker is None
     assert any(
@@ -87,7 +87,7 @@ async def test_a_site_without_the_key_pair_has_no_quote_and_offers_no_sinopac() 
     config = without(trading_config(SIMULATION), *SIMULATION.credentials)
     validate_trading_environment(config)
 
-    assert await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig())) == (None, None)
+    assert await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig())) == (None, None, None)
 
 
 @pytest.mark.parametrize("credential", PRODUCTION_VARIABLES)
@@ -191,7 +191,7 @@ async def test_a_failed_shioaji_login_leaves_no_quote_and_no_sinopac_saying_why_
     logger = RecordingLogger()
     state = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
-    assert await connect_shioaji(trading_config(PRODUCTION), state, TaiwanMarketClock(MarketHoursConfig())) == (None, None)
+    assert (await connect_shioaji(trading_config(PRODUCTION), state, TaiwanMarketClock(MarketHoursConfig())))[:2] == (None, None)
     assert any(line.startswith("Shioaji Production login failed: TokenError, status 401.") for _, line in logger.records)
     assert not any("bad api key" in line for _, line in logger.records)
 

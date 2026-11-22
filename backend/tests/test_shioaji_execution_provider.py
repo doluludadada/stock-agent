@@ -22,7 +22,7 @@ from shioaji.contracts import Stock as StockContract
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.order import Order as BrokerOrder
 from shioaji.position import AccountBalance
-from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, OddLotMatches, Report, position, sale, stock
+from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, OddLotMatches, Report, connection_on, position, sale, stock
 from support.fakes import FakeMarketClock, FakeOrderingSwitch, FakeTradingJournal, FakeUserStore, RecordingLogger, no_refusal
 from support.harness import harness_config
 from support.settings import shipped_config, sinopac_setup
@@ -76,9 +76,10 @@ def provider(
     if client.stock_account is None:
         client.stock_account = client.account_at_login
 
-    login, connection = login_of(client.simulation), ShioajiConnection(client=client, up=True)
+    login, connection = login_of(client.simulation), connection_on(client)
     return ShioajiExecutionProvider(
         connection=connection,
+        client=client,
         login=login,
         config=config,
         market_clock=clock or FakeMarketClock(taipei(time(10, 0))),
@@ -101,7 +102,12 @@ async def connected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionPr
     login, connection = login_of(simulation), ShioajiConnection(client=client)
     quotes = quotes_of(connection, login)
     broker = ShioajiExecutionProvider(
-        connection=connection, login=login, config=CONFIG, market_clock=TaiwanMarketClock(CONFIG.market_hours), logger=SilentLogger()
+        connection=connection,
+        client=client,
+        login=login,
+        config=CONFIG,
+        market_clock=TaiwanMarketClock(CONFIG.market_hours),
+        logger=SilentLogger(),
     )
     await quotes.connect()
     await broker.connect()
@@ -118,6 +124,8 @@ def quotes_of(connection: ShioajiConnection, login: ShioajiLogin) -> ShioajiQuot
         market_data=CONFIG.market_data,
         board_lot_shares=1000,
         logger=SilentLogger(),
+        checks_account=True,
+        replaced=None,
     )
 
 
@@ -723,6 +731,8 @@ def logged_in(logger: RecordingLogger) -> tuple[FakeShioaji, ShioajiQuoteProvide
         market_data=CONFIG.market_data,
         board_lot_shares=1000,
         logger=logger,
+        checks_account=True,
+        replaced=None,
     )
     return client, quotes, connection
 
@@ -755,7 +765,12 @@ async def test_an_order_sent_on_the_login_logs_its_events_from_the_sdks_thread_w
     await quotes.connect()
     client.scripts = {StockOrderLot.IntradayOdd: [Report(Status.PartFilled, ((100.0, 200),))]}
     broker = ShioajiExecutionProvider(
-        connection=connection, login=login_of(True), config=CONFIG, market_clock=FakeMarketClock(NOW), logger=SilentLogger()
+        connection=connection,
+        client=connection.client,
+        login=login_of(True),
+        config=CONFIG,
+        market_clock=FakeMarketClock(NOW),
+        logger=SilentLogger(),
     )
 
     placed = await broker.place_order(order(quantity=1500), no_refusal, asyncio.Event())
@@ -1388,7 +1403,7 @@ async def broker_of(
     polling = CONFIG.shioaji.model_copy(update={"poll_interval_seconds": 0, "max_polls": 3})
     site = sinopac_setup(CONFIG.model_copy(update={"shioaji": polling}), server)
     process = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
-    _, broker = await connect_shioaji(site, process, TaiwanMarketClock(CONFIG.market_hours))
+    _, broker, _ = await connect_shioaji(site, process, TaiwanMarketClock(CONFIG.market_hours))
     return broker
 
 
@@ -1627,7 +1642,8 @@ async def test_the_simulation_cash_starts_at_its_own_setting_and_not_at_the_mock
     client = FakeShioaji()
     client.stock_account = client.account_at_login
     broker = ShioajiExecutionProvider(
-        connection=ShioajiConnection(client=client, up=True),
+        connection=connection_on(client),
+        client=client,
         login=login_of(simulation=True),
         config=config,
         market_clock=TaiwanMarketClock(config.market_hours),

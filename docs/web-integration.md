@@ -359,14 +359,18 @@ account the user confirmed, and one that is no longer the saved account answers 
 the ranking's stocks, capped by its share of the cash the sales free, in whole lots of `analysis.lot_size`
 (`RankingFollowRule`). A ranked stock already held is left as it is, so a second follow of the same decision answers
 409 `nothing_to_follow`, and a stock whose order was refused stays open to the next follow. The one exception is the
-follows after a switch of `ranking.active_formula`, while the account's last follow that left it nothing to trade
-used another formula (`TopUpRule`): each also buys every ranked stock the account holds up to its equal weight where it
-is worth less by more than `ranking.top_up_tolerance_pct` (10%) of that weight, inside the same bounds and best first,
-so a switch from 20 stocks to 10 does not leave half the account in cash. Such a follow is something to follow also
-for an account that holds the new ranking alone. A top-up it did not buy counts as left to trade, so the decision stays
-pending and the schedule tries again on the next session, still a follow after the switch. On SinoPac, which pays a
-sale at settlement, the first of them tops up with the cash the account has before its sales settle, and the next
-with the cash settled since. Once one left nothing to trade, every later follow tops up nothing. The tolerance keeps
+follows of a switch of `ranking.active_formula` (`FormulaSwitchRule`): from the account's first follow after its last
+one under another formula, finished or not, those of the first `ranking.top_up_follow_days` (4) days on which a follow
+of the account took a decision under the new formula and ended without a failure. Each also buys every ranked stock
+the account holds up to its equal weight where it is worth less by more than `ranking.top_up_tolerance_pct` (10%) of
+that weight (`TopUpRule`), inside the same bounds and best first, so a switch from 20 stocks to 10 does not leave half
+the account in cash. Such a follow is something to follow also for an account that holds the new ranking alone. A
+top-up it did not buy counts as left to trade, so the decision stays pending and the schedule tries again on the next
+session, a switch follow while the switch lasts. On SinoPac, which pays a sale at settlement, the first of them tops
+up with the cash the account has before its sales settle, and the next with the cash settled since. The switch ends
+at the first of them that left nothing to trade, or with its days: a top-up no BUY can make (no cash to spare, a gap
+under one share at its limit with the fee, a tolerance of 0) is then left, the next follow tops up nothing and
+finishes the decision, and no later follow tops up. The tolerance keeps
 the mock account, which keeps about `trading.limit_offset_pct` of each BUY as cash, from buying a few shares at the
 minimum fee every session. A ranking that ranks no
 stock sells nothing. `GET /v1/rankings/follow` answers which account it is for (`account`), what that account holds

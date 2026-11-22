@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 from support.databases import open_database, raw_engine
-from support.fake_shioaji import FakeShioaji
+from support.fake_shioaji import FakeShioaji, connection_on
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
@@ -49,7 +49,6 @@ from a_domain.types.enums import (
 from a_domain.types.ids import UserId
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
 from c_infrastructure.database.repositories.holding_repository import HoldingRepository
-from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
 pytestmark = pytest.mark.asyncio
@@ -565,7 +564,7 @@ async def test_the_sinopac_account_says_which_server_it_is_when_its_login_is_dow
     down = portfolio_site()
     down.real_broker.current_link = replace(down.real_broker.current_link, up=False)
     assert down.runtime.shioaji is not None
-    down.runtime.shioaji.up = False
+    down.runtime.shioaji.lost(down.runtime.shioaji.client)
 
     async with serve(down) as client:
         login_down = (await client.get("/v1/account/brokerage")).json()
@@ -602,7 +601,7 @@ def sinopac_answering_in(milliseconds: int) -> tuple[CliHarness, FakeShioaji]:
     client.stock_account = client.account_at_login
     login = config.shioaji.login()
     assert login is not None
-    adapter = ShioajiExecutionProvider(ShioajiConnection(client=client, up=True), login, config, harness.clock, harness.logger)
+    adapter = ShioajiExecutionProvider(connection_on(client), client, login, config, harness.clock, harness.logger)
     dependencies = replace(harness.dependencies, real_broker=adapter)
     runtime = runtime_for(replace(harness, dependencies=dependencies), config)
     runtime.become_current()

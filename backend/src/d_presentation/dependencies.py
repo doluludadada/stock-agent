@@ -261,10 +261,10 @@ class Runtime:
     """Whether the runtime's realtime quotes are the broker's: its Shioaji login was up when it opened."""
     shioaji: ShioajiConnection | None
     """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
-    shioaji_logged_in_at: datetime | None
+    shioaji_client: Shioaji | None
     """
-    When the login whose client this runtime's SinoPac keeps succeeded, as `shioaji` said when the runtime opened; None
-    before one did.
+    The client of the login this runtime opened on, up or not, which its SinoPac keeps and a renewal replaces
+    (connect_shioaji); None where the site makes no login.
     """
     real_broker: RealBroker | None
     """SinoPac on the site's login, where the audience offers it and its account check passed (connect_shioaji); else None."""
@@ -294,20 +294,32 @@ class Runtime:
 
     @property
     def login_down(self) -> bool:
-        """Whether the site's Shioaji login failed or went down, which the next use opens a runtime to make again."""
+        """
+        Whether the site's Shioaji login failed or went down, which the timer of the scheduled follows, or the CLI's next
+        round, makes again (RuntimeSwitch.log_in_again).
+        """
         return self.shioaji is not None and not self.shioaji.up
 
     @property
     def login_due(self) -> bool:
         """
-        Whether the site's Shioaji login is to be made again now (ShioajiConnection.due): it failed, went down or is
-        stale, and no login failed within shioaji.login_retry_seconds. RuntimeSwitch.log_in_again then opens a runtime
-        on these settings, which logs in again on a new client. Also while a later login than this runtime's is up: a
-        login a runtime left running when it did not open within api.settings_build_timeout_seconds succeeded after, so
-        this runtime's SinoPac keeps a client that is no longer the connection's and reports down; the runtime opened
-        then takes that login up and makes none.
+        Whether a renewal is to replace this runtime now (RuntimeSwitch.log_in_again), which opens a runtime on these
+        settings that logs in past this one's client: the site's latest login failed or went down; the latest login is
+        on another client than this runtime's, such as one a renewal left running when it did not open within
+        api.settings_build_timeout_seconds that succeeded after, which the runtime opened then takes up and makes none;
+        or the latest login is stale (ShioajiConnection.stale). Never within the wait after a failed login
+        (ShioajiConnection.retrying).
         """
-        return self.shioaji is not None and self.shioaji.due(self.market_clock, self.config.shioaji, self.shioaji_logged_in_at)
+        connection = self.shioaji
+
+        if connection is None or connection.retrying(self.market_clock, self.config.shioaji):
+            return False
+
+        return (
+            not connection.up
+            or connection.client is not self.shioaji_client
+            or connection.stale(self.market_clock, self.config.shioaji)
+        )
 
     def become_current(self) -> None:
         """What the process takes from the settings of the runtime that serves new work: the log level of its one logger."""
@@ -335,12 +347,14 @@ class ProcessState:
     """The pace of the requests to each exchange's site for a daily report, which every runtime's requests keep."""
     shioaji_connections: dict[ShioajiLogin, ShioajiConnection] = field(default_factory=dict)
     """
-    The Shioaji connection of each login a runtime of the process made, kept for the life of the process: its client,
-    logged in once and again only after the login failed or went down, every earlier client, and the one request pacer
-    of the login. Every later runtime on the same login reuses it, after a switch of shioaji.server away and back too.
-    The process logs in once per server and never logs out, and no client is collected: shioaji 1.3.1 on Python 3.14
-    can segfault after a logout, when Solace's thread races the interpreter. The session ends with the process, which
-    may itself exit on a segfault from Solace's thread at finalization, after the app's shutdown, so losing nothing.
+    The Shioaji connection of each login a runtime of the process made, kept for the life of the process: every client a
+    login was made on, which of them are up, and the one request pacer of the login. Every later runtime on the same
+    login reuses it, after a switch of shioaji.server away and back too, and opens on the login that is up. A runtime
+    open makes the first login alone; after that only the renewal (RuntimeSwitch.log_in_again) logs in again, once the
+    latest login failed or went down or is stale, made before the market day's shioaji.login_renewal_time. No client is
+    logged out or collected: shioaji 1.3.1 on Python 3.14 can segfault after a logout, when Solace's thread races the
+    interpreter. The sessions end with the process, which may itself exit on a segfault from Solace's thread at
+    finalization, after the app's shutdown, so losing nothing.
     """
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The fresh Google authentications granted for a settings save, which a reload of the settings must not forget."""
@@ -438,6 +452,8 @@ class ProviderDependencies:
     The process's Shioaji login on the server shioaji.server names, on an audience with realtime quotes, whether it is
     up or not: a login that failed at the start has one too. None on a public site and without the server's key pair.
     """
+    shioaji_client: Shioaji | None
+    """The client of that login the runtime opened on, which real_broker orders on (connect_shioaji); None without one."""
     daily_close_archive: IDailyCloseArchive
     fundamentals_provider: IFundamentalsProvider | None
     """MOPS, or None for an audience that reads no MOPS (public): its valuation is refused."""
@@ -546,21 +562,24 @@ def site_login(config: AppConfig) -> ShioajiLogin | None:
 
 
 async def connect_shioaji(
-    config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock
-) -> tuple[IBrokerQuoteProvider | None, RealBroker | None]:
+    config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock, *, replaced: Shioaji | None = None
+) -> tuple[IBrokerQuoteProvider | None, RealBroker | None, Shioaji | None]:
     """
-    The market data and the SinoPac broker of a runtime on the process's Shioaji login. Both read the client of the
-    login on the server shioaji.server names, which the process logs in once and every later runtime on that server
-    reuses, until the login fails, Shioaji reports it down or refuses its token, or it turns stale at the market day's
-    shioaji.login_renewal_time: then the next runtime logs in again on a new client (ShioajiQuoteProvider.connect,
-    RuntimeSwitch.log_in_again). The broker keeps the client of its runtime's login, so a run never changes client. A
-    runtime on the other server, after a switch, logs in there on a client of its own. The broker exists where the
-    audience offers it and its account check passes (on production with the CA certificate the production credentials
-    name); a run uses it only when an administrator chooses it.
+    The market data, the SinoPac broker and the client of a runtime on the process's Shioaji login on the server
+    shioaji.server names, which the process logs in once and every later runtime on that server reuses, stale or not.
+    Once that login fails or Shioaji reports it down or refuses its token, a runtime opens without it until the
+    renewal (RuntimeSwitch.log_in_again) logs in again on a new client (ShioajiQuoteProvider.connect); the renewal's
+    runtime passes the client it replaces, `replaced`, and logs in past it. The client is read once, after the quotes
+    connected, and both the broker and the runtime keep that one (Runtime.shioaji_client), so a run never changes client
+    and a runtime knows which login it is on. A runtime on the other server, after a switch, logs in there on a client
+    of its own. The broker exists where the audience offers it and its account check passes (on production with the CA
+    certificate the production credentials name); a run uses the broker only when an administrator chooses it.
 
     An audience without realtime quotes (public) builds no Shioaji adapter. A personal site without the key pair, or
     whose login fails, has no realtime quote and no SinoPac, so nothing is ordered; its daily history still comes from
-    the exchanges' reports. An account check that fails leaves the market data and offers no SinoPac.
+    the exchanges' reports. A login without the stock account counts as failed only where it would replace a SinoPac
+    login that works (log_in). Otherwise it serves the market data, and its account check fails, so the site offers no
+    SinoPac until a login brings the account.
     """
     logger = process.logger
     login = site_login(config)
@@ -569,7 +588,7 @@ async def connect_shioaji(
         if config.audience.realtime_quotes:
             logger.warning(f"No Shioaji key pair for SinoPac's {config.shioaji.server.label} server: no realtime quote, so no order")
 
-        return None, None
+        return None, None, None
 
     client_class = import_shioaji()
 
@@ -588,6 +607,8 @@ async def connect_shioaji(
         market_data=config.market_data,
         board_lot_shares=config.market.board_lot_shares,
         logger=logger,
+        checks_account=ExecutionProvider.SHIOAJI in config.audience.brokers,
+        replaced=replaced,
     )
     server, logged_in_at = login.server.label, connection.logged_in_at
 
@@ -595,24 +616,34 @@ async def connect_shioaji(
         await quotes.connect()
     except Exception as error:
         logger.warning(f"Shioaji {server} login failed: {error}. No realtime quote, so no order")
-        return None, None
+        return None, None, connection.client
 
-    reused = connection.logged_in_at == logged_in_at
+    client, reused = connection.client, connection.logged_in_at == logged_in_at
     login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
     logger.info(f"{login_line} for realtime quotes")
-    return quotes, await connect_sinopac(config, connection, login, market_clock, logger)
+    return quotes, await connect_sinopac(config, connection, client, login, market_clock, logger), client
 
 
 async def connect_sinopac(
-    config: AppConfig, connection: ShioajiConnection, login: ShioajiLogin, market_clock: TaiwanMarketClock, logger: ILoggingProvider
+    config: AppConfig,
+    connection: ShioajiConnection,
+    client: Shioaji,
+    login: ShioajiLogin,
+    market_clock: TaiwanMarketClock,
+    logger: ILoggingProvider,
 ) -> RealBroker | None:
-    """SinoPac's broker on the login the quotes hold, where the audience offers it and its account check passes, else None."""
+    """
+    SinoPac's broker on `client`, of the login the quotes connected on, where the audience offers it and its account
+    check passes, else None.
+    """
     from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
     if ExecutionProvider.SHIOAJI not in config.audience.brokers:
         return None
 
-    broker = ShioajiExecutionProvider(connection=connection, login=login, config=config, market_clock=market_clock, logger=logger)
+    broker = ShioajiExecutionProvider(
+        connection=connection, client=client, login=login, config=config, market_clock=market_clock, logger=logger
+    )
     server = login.server.label
 
     try:
@@ -835,6 +866,7 @@ async def build_provider_dependencies(
     accounts_key: SecretStr,
     quotes: IBrokerQuoteProvider | None,
     real_broker: RealBroker | None,
+    shioaji_client: Shioaji | None,
 ) -> ProviderDependencies:
     logger = process.logger
     stock_provider = TaiwanStockProvider(
@@ -889,6 +921,7 @@ async def build_provider_dependencies(
         users_orders=SqlUsersOrders(db),
         broker_quotes=quotes,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
+        shioaji_client=shioaji_client,
         daily_close_archive=archive,
         fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock, stock_provider),
         company_basics_provider=create_company_basics_provider(config, db, logger),
@@ -1285,7 +1318,7 @@ def compose_runtime(
         market_clock=market_clock,
         broker_market_data=dependencies.broker_quotes is not None,
         shioaji=dependencies.shioaji,
-        shioaji_logged_in_at=dependencies.shioaji.logged_in_at if dependencies.shioaji is not None else None,
+        shioaji_client=dependencies.shioaji_client,
         real_broker=dependencies.real_broker,
         users_orders=dependencies.users_orders,
     )
@@ -1305,7 +1338,9 @@ def create_process_state(config: AppConfig) -> ProcessState:
 
 
 @asynccontextmanager
-async def open_runtime(config: AppConfig, process: ProcessState, *, broker_login: bool = True) -> AsyncGenerator[Runtime]:
+async def open_runtime(
+    config: AppConfig, process: ProcessState, *, broker_login: bool = True, replaced: Shioaji | None = None
+) -> AsyncGenerator[Runtime]:
     """
     The whole startup for settings startup_settings passed: the accounts key (secrets/accounts.key created on the first
     start where the environment allows it), the database (opened and brought to the current schema), the Shioaji login
@@ -1313,7 +1348,8 @@ async def open_runtime(config: AppConfig, process: ProcessState, *, broker_login
     adapter and the check that the key opens the saved users. It raises one of STARTUP_REFUSALS for a setup it refuses,
     before any workflow runs. The database closes when the caller is done, or at once when a later step fails. Without
     broker_login it makes no Shioaji login, as a personal site without the key pair: no realtime quote and no SinoPac,
-    for a command that reads only the held history.
+    for a command that reads only the held history. A renewal passes the client it replaces as `replaced`
+    (connect_shioaji).
     """
     accounts_key = load_accounts_key(config, process.logger)
     market_clock = TaiwanMarketClock(config.market_hours)
@@ -1322,8 +1358,12 @@ async def open_runtime(config: AppConfig, process: ProcessState, *, broker_login
         db = DatabaseConnector(config=config, logger=process.logger)
         opened.push_async_callback(db.close)
         await db.init_db()
-        quotes, real_broker = await connect_shioaji(config, process, market_clock) if broker_login else (None, None)
-        dependencies = await build_provider_dependencies(config, db, process, market_clock, accounts_key, quotes, real_broker)
+        quotes, real_broker, shioaji_client = (
+            await connect_shioaji(config, process, market_clock, replaced=replaced) if broker_login else (None, None, None)
+        )
+        dependencies = await build_provider_dependencies(
+            config, db, process, market_clock, accounts_key, quotes, real_broker, shioaji_client
+        )
         await dependencies.user_store.check_key()
         yield compose_runtime(config, process.logger, market_clock, dependencies)
 

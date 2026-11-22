@@ -19,7 +19,8 @@ class RankingFollowSchedule:
     (FollowAccountRule, on what the logins of `accounts`, the user's, report of themselves and the site's ordering
     switch as it is now); and where their schedule stands (FollowScheduleRule): the time they chose, the times the site
     offers, the ranking's latest decision while no ranking follow of the follow account finished it under the active
-    formula, the schedule's last follow that left it so, and whether the schedule follows it now. It reads the sessions
+    formula, the schedule's last follow that left it so, whether the schedule follows it now, and whether a follow of
+    the account now is one of a switch of the active formula, which tops up (FormulaSwitchRule). It reads the sessions
     of the ranking's history, none while the site holds no bar, so it answers on a site that can make no ranking yet;
     the user's ranking follows from the trading journal, on the mock account since it opened while the site offers it
     to the user, whose book it reads for that alone, and on a real broker ever, of which it returns those that took a

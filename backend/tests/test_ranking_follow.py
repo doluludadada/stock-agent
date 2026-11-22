@@ -494,7 +494,7 @@ def site(**options) -> CliHarness:
     """The harness's site with the history, the revenue and the quotes above, a member beside the administrator."""
     config = harness_config()
     features = config.features.model_copy(update=options.pop("features", {}))
-    ranking = with_formulas(config.ranking, *options.pop("formulas", (FORMULA,)))
+    ranking = with_formulas(config.ranking, *options.pop("formulas", (FORMULA,))).model_copy(update=options.pop("ranking", {}))
     harness = build_harness(config=config.model_copy(update={"ranking": ranking, "features": features}), **options)
     harness.users.add(MEMBER, MEMBER_PASSWORD)
 

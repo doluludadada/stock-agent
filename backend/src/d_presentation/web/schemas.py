@@ -504,9 +504,11 @@ class BrokerageAccountResponse(BaseModel):
     login_up: bool
     login_down: bool
     """
-    The site's Shioaji login failed or went down, and the Web API's timer logs in again (Runtime.login_down). False with
-    `login_up` false: nothing logs in again before the next save or restart, since the login is up but SinoPac's account
-    check failed, such as the CA certificate's activation on production, or the site has no Shioaji login. The log says why.
+    The site's Shioaji login failed or went down, and the Web API's timer logs in again (Runtime.login_down), within
+    api.follow_schedule_poll_seconds, and after a failed login no sooner than shioaji.login_retry_seconds, doubling up to
+    shioaji.login_retry_max_seconds while the logins keep failing. False with `login_up` false: the login is up but
+    SinoPac's account check failed, such as the CA certificate's activation on production, which the next renewal at
+    shioaji.login_renewal_time checks again, or the site has no Shioaji login. The log says why.
     """
 
     ordering: bool

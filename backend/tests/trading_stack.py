@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from support.fake_shioaji import FakeShioaji
+from support.fake_shioaji import FakeShioaji, connection_on
 from support.fakes import (
     FakeAiProvider,
     FakeArticleIndex,
@@ -49,7 +49,6 @@ from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.users_orders import SqlUsersOrders
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
-from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.system.settings_files import SettingsFiles
@@ -192,6 +191,7 @@ async def open_stack(
         return owned
 
     archive = FakeDailyCloseArchive()
+    connection = connection_on(FakeShioaji())
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=quotes,
@@ -214,7 +214,8 @@ async def open_stack(
         users_stocks=FakeUsersStocks(),
         users_orders=SqlUsersOrders(db),
         broker_quotes=quotes,
-        shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
+        shioaji=connection,
+        shioaji_client=connection.client,
         daily_close_archive=archive,
         fundamentals_provider=FakeFundamentalsProvider(),
         company_basics_provider=None,

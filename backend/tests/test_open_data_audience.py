@@ -288,7 +288,7 @@ async def test_a_public_site_logs_in_to_no_broker_and_offers_only_the_mock_accou
     validate_trading_environment(public)
     state = ProcessState(logger=SilentLogger(), attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
-    assert await connect_shioaji(public, state, TaiwanMarketClock(public.market_hours)) == (None, None)
+    assert await connect_shioaji(public, state, TaiwanMarketClock(public.market_hours)) == (None, None, None)
     assert public.broker_access_rule().brokers == frozenset({ExecutionProvider.MOCK})
     assert refused_adapters == []
 

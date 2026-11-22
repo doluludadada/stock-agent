@@ -52,14 +52,13 @@ from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
-from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from c_infrastructure.system.settings_files import SettingsFiles
 from d_presentation.cli import interactive, terminal
 from d_presentation.dependencies import OwnedPorts, ProviderDependencies, Runtime, compose_runtime
 from d_presentation.live_runtime import RuntimeSwitch
-from support.fake_shioaji import FakeShioaji
+from support.fake_shioaji import FakeShioaji, connection_on
 from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
@@ -485,6 +484,7 @@ def build_harness(
             ),
         )
 
+    connection = connection_on(FakeShioaji()) if login else None
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=prices,
@@ -505,7 +505,8 @@ def build_harness(
         users_stocks=users_stocks,
         users_orders=FakeUsersOrders(lambda: [journal, *(owned.journal for owned in owners.values())]),
         broker_quotes=prices if login else None,
-        shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
+        shioaji=connection,
+        shioaji_client=connection.client if connection is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=fundamentals if config.audience.mops else None,
         company_basics_provider=company_basics if config.audience.mops else None,
@@ -601,7 +602,7 @@ async def open_harness_switch(harness: CliHarness) -> AsyncIterator[RuntimeSwitc
     fakes from the settings files under harness.settings_root, as the real opener does over the real adapters.
     """
 
-    def opener(config: AppConfig):
+    def opener(config: AppConfig, replaced: object):
         return nullcontext(harness.runtime if config is harness.config else runtime_for(harness, config))
 
     switch = RuntimeSwitch(opener, harness.settings_root, harness.logger)

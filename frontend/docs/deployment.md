@@ -531,6 +531,25 @@ To go back to the version before, restore the backup of step 2 with
 `docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes`, then check out the
 old version and rebuild only the backend with `docker compose up -d --no-deps --build backend`.
 
+### Update to the bounded switch and the login's backoff
+
+This update changes no schema. It adds two operator-only settings, `ranking.top_up_follow_days` (4) and
+`shioaji.login_retry_max_seconds` (900); a file without them takes their defaults. A file whose
+`shioaji.login_retry_seconds` is above 900 must also set `shioaji.login_retry_max_seconds` at least as high, or the site
+refuses to start.
+
+1. Get the new version, back up the database and restart the site on the new images.
+
+   ```bash
+   git pull
+   docker compose build
+   docker compose exec backend python -m d_presentation.cli.database backup
+   docker compose up -d
+   ```
+
+To go back to the version before, check out the old version and rebuild only the backend with
+`docker compose up -d --no-deps --build backend`.
+
 ### Read the company background
 
 MOPS and the exchange's document site are sources of a personal site only. A public site reads neither, and these

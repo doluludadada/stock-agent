@@ -535,9 +535,9 @@ class Pipeline:
         at an equal weight of the account (RankingFollowRule), each priced as this site prices an order now, like a
         follow of a run; every holding is priced too, since the equal weight is a share of the account's value. A
         ranked stock the account already holds is left as it is, so a second follow of the same decision sends nothing
-        but what the first could not fill, except by the follows after a switch of the active formula until one of them
-        finished the decision, which also top each one short of its equal weight up to it (TopUpRule). The follow
-        account is asked first
+        but what the first could not fill, except by the follows of a switch of the active formula, which also top each
+        one short of its equal weight up to it (TopUpRule) for the switch's first ranking.top_up_follow_days days, until
+        one of them finished the decision. The follow account and the switch are asked first, once
         (RankingFollowSchedule): a run on another broker than it fails before anything is read (FollowAccountChanged),
         and a follow account the site does not
         offer the user now, or a market phase no order is placed in, ends the run with nothing sent, on this account
@@ -553,10 +553,12 @@ class Pipeline:
         """
         async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id, scheduled=scheduled) as stats:
             status = PipelineStatus(stats=stats)
-            account, _, follows = await self.ranking_follow_schedule.execute(user)
+            account, schedule, _ = await self.ranking_follow_schedule.execute(user)
             history = await self.ranking_history_loader.execute()
             ranking = await self.latest_ranking.execute(history)
-            holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(account, ranking, follows, status.stats)
+            holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(
+                account, ranking, schedule.switched_from, status.stats
+            )
 
             if account.refusal is not None or status.follow_refusal is not None:
                 return status
@@ -568,7 +570,7 @@ class Pipeline:
             await self.data_collector.execute(traded, 1, status.stats)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(traded, status.stale_stock_ids, status.stats)
             status.equity, status.signals = await self.ranking_follow_signals.execute(
-                ranking, status.stocks, status.account, status.stats
+                ranking, status.stocks, status.account, schedule.switched_from, status.stats
             )
             for signal in status.signals:
                 if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
@@ -576,7 +578,9 @@ class Pipeline:
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
             status.orders = await self.order_settlement.execute(status.stats, status.orders)
-            await self.ranking_follow_candidates.execute(account, ranking, follows, status.stats, status.stocks, status.equity)
+            await self.ranking_follow_candidates.execute(
+                account, ranking, schedule.switched_from, status.stats, status.stocks, status.equity
+            )
 
         return status
 
@@ -594,7 +598,7 @@ class Pipeline:
         account, schedule, follows = await self.ranking_follow_schedule.execute(user)
         history = await self.ranking_history_loader.execute()
         ranking = await self.latest_ranking.execute(history)
-        holdings, refusal = await self.ranking_follow_candidates.execute(account, ranking, follows)
+        holdings, refusal = await self.ranking_follow_candidates.execute(account, ranking, schedule.switched_from)
         settings = RankingFollowSettings(account, schedule, follows)
 
         if not account.measured:

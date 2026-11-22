@@ -22,6 +22,8 @@ from shioaji.data import Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
 from shioaji.position import AccountBalance, SettlementV1, StockPosition, StockProfitLoss, TradingLimits
 
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
+
 DONE = {Status.Filled, Status.Cancelled, Status.Failed, Status.Inactive}
 
 
@@ -529,3 +531,8 @@ def same_account(earlier: FakeShioaji) -> FakeShioaji:
         _matched=earlier._matched,
         _unlisted=earlier._unlisted,
     )
+
+
+def connection_on(client: FakeShioaji) -> ShioajiConnection:
+    """A connection whose one login, on `client`, is up, as a runtime finds it once connect_shioaji logged in."""
+    return ShioajiConnection(client=client, up_clients={id(client): client})

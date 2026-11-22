@@ -94,7 +94,8 @@ type Waits = Sequence[float]
 class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
     """
     The Sinopac broker through the Shioaji client, simulation or production as the login's environment says. The client
-    is the one ShioajiQuoteProvider logged in once for the process, so quotes and orders share one login.
+    is the one of the login its runtime opened on (connect_shioaji), which ShioajiQuoteProvider logged in, so quotes and
+    orders share one login; the adapter keeps it to its end, whatever login comes after.
 
     The client is synchronous, so every call runs in a worker thread. Quantities are shares in the domain:
     LotSplitRule splits them into the whole lots, sent as a board-lot order with the order's time in force (IOC or
@@ -142,13 +143,13 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
     def __init__(
         self,
         connection: ShioajiConnection,
+        client: Shioaji,
         login: ShioajiLogin,
         config: AppConfig,
         market_clock: IMarketClock,
         logger: ILoggingProvider,
     ) -> None:
-        self._connection = connection
-        self._session = ShioajiSession(connection, connection.client)
+        self._session = ShioajiSession(connection, client)
         self._login = login
         self._market_clock = market_clock
         self._logger = logger
@@ -202,14 +203,13 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
     @override
     def link(self) -> BrokerLink:
         """
-        Up while the connection's login is the one this adapter's client made and Shioaji has not reported it down: a
-        later runtime that logs in again does so on a new client, and this one's is then gone. The server is the
-        client's own, as the SDK was made.
+        Up while Shioaji has not reported the login of this adapter's own client down (ShioajiConnection.up_on): a
+        later login on a new client leaves it up, so a run keeps ordering on the client it started on to its end. The
+        server is the client's own, as the SDK was made.
         """
-        connection = self._connection
         return BrokerLink(
             broker=ExecutionProvider.SHIOAJI,
-            up=connection.up and connection.client is self._session.client,
+            up=self._session.connection.up_on(self._session.client),
             simulation=self._session.client.simulation,
         )
 

@@ -49,7 +49,7 @@ class RecordingOpener:
         self.failure = failure
 
     @asynccontextmanager
-    async def __call__(self, config: AppConfig) -> AsyncIterator[Runtime]:
+    async def __call__(self, config: AppConfig, replaced: object) -> AsyncIterator[Runtime]:
         record = Opened(config)
         self.opened.append(record)
 

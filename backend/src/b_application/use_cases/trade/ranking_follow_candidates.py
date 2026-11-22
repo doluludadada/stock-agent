@@ -1,7 +1,8 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.rules.trading.follow import FollowAccount, FollowWindowRule, RankingHoldings, RankingHoldingsRule
@@ -15,20 +16,20 @@ class RankingFollowCandidates:
     """
     Use Case: What a follow of the monthly ranking may take now on the user's follow account (`account`, as
     RankingFollowSchedule answered it): which of the ranking's stocks that account holds and lacks and which holdings
-    the ranking left (RankingHoldingsRule), the ranked stocks it holds that a follow after a switch of the active
-    formula tops up (TopUpRule, on the account's ranking follows in `follows`), and why a follow may not start now, or
-    None. Before the run valued the account every ranked stock it holds may want a top-up then; after its orders, with
-    the run's prices (`priced`) and the equity it valued the account at (`equity`), only those still short of their
-    weight. An account the site does not offer the user now (`account.refusal`) is not read: the holdings are empty and
-    the follow says nothing more. A follow's run, given as `stats`, must have started on that account,
-    FollowAccountChanged otherwise, before anything is read, so no run reads one account and orders on another.
-    Otherwise it reads the account's positions in one request (`accounts`, the user's), never an order, and the
-    market's phase decides (FollowWindowRule) on the sales, the purchases and the top-ups. The run asks it before its
-    orders and again after them, and keeps how many stocks it still had to trade at each look, its top-ups included,
-    so the record says whether the follow finished the decision: the schedule follows a decision again until one did.
-    The run also keeps the decision it took and the formula that made the ranking, as it was defined then, so its
-    orders are never credited to a formula chosen later. A run refused for the market's phase took nothing and keeps
-    neither, and a ranking that decides nothing leaves the record as it was.
+    the ranking left (RankingHoldingsRule), the ranked stocks it holds that a follow of a switch of the active formula
+    tops up (TopUpRule, while `switched_from`, the schedule's FollowSchedule.switched_from, names the formula switched
+    from), and why a follow may not start now, or None. Before the run valued the account every ranked stock it holds
+    may want a top-up then; after its orders, with the run's prices (`priced`) and the equity it valued the account at
+    (`equity`), only those still short of their weight. An account the site does not offer the user now
+    (`account.refusal`) is not read: the holdings are empty and the follow says nothing more. A follow's run, given as
+    `stats`, must have started on that account, FollowAccountChanged otherwise, before anything is read, so no run
+    reads one account and orders on another. Otherwise it reads the account's positions in one request (`accounts`,
+    the user's), never an order, and the market's phase decides (FollowWindowRule) on the sales, the purchases and the
+    top-ups. The run asks it before its orders and again after them, and keeps how many stocks it still had to trade
+    at each look, its top-ups included, so the record says whether the follow finished the decision: the schedule
+    follows a decision again until one did. The run also keeps the decision it took and the formula that made the
+    ranking, as it was defined then, so its orders are never credited to a formula chosen later. A run refused for the
+    market's phase took nothing and keeps neither, and a ranking that decides nothing leaves the record as it was.
     """
 
     def __init__(
@@ -44,7 +45,7 @@ class RankingFollowCandidates:
         self,
         account: FollowAccount,
         ranking: Ranking,
-        follows: Sequence[SystemStats],
+        switched_from: RankingFormula | None,
         stats: SystemStats | None = None,
         priced: Mapping[str, Stock] | None = None,
         equity: float | None = None,
@@ -59,8 +60,7 @@ class RankingFollowCandidates:
 
         positions = await self._accounts[account.broker].open_positions()
         holdings = self._holdings_rule.apply(ranking, frozenset(position.stock_id for position in positions))
-        on_account = [follow for follow in follows if follow.execution_provider == account.broker]
-        traded = [*holdings.open, *self._top_up_rule.apply(ranking, positions, on_account, priced or {}, equity)]
+        traded = [*holdings.open, *self._top_up_rule.apply(ranking, positions, switched_from, priced or {}, equity)]
         refusal = self._window_rule.apply(traded, self._market_clock.trading_phase())
         window_closed = refusal is not None and refusal.lifts_later
 

@@ -12,7 +12,7 @@ import pytest
 import shioaji
 from pydantic import SecretStr, ValidationError
 from shioaji.error import TokenError
-from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, snapshot, stock
+from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, connection_on, snapshot, stock
 from support.fakes import RecordingLogger
 from support.settings import shipped_config, sinopac_setup
 from trading_stack import MONDAY_10_00, SilentLogger, analysed_stock, open_stack
@@ -27,7 +27,7 @@ from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import IndexQuoteContract, MarketDataConfig, MarketHoursConfig
 from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
-from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
+from c_infrastructure.market.shioaji_quote_provider import ShioajiQuoteProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from d_presentation.dependencies import ProcessState, connect_shioaji
@@ -61,7 +61,7 @@ def quote_provider(
     client: FakeShioaji, market_data: MarketDataConfig | None = None, logger: ILoggingProvider | None = None
 ) -> ShioajiQuoteProvider:
     return ShioajiQuoteProvider(
-        connection=ShioajiConnection(client=client, up=True),
+        connection=connection_on(client),
         new_client=FakeShioaji,
         login=ShioajiLogin(server=ShioajiServer.SIMULATION, api_key=SecretStr("key"), secret_key=SecretStr("secret")),
         shioaji=shipped_config().shioaji,
@@ -69,6 +69,8 @@ def quote_provider(
         market_data=market_data or MarketDataConfig(quote_request_interval_seconds=0),
         board_lot_shares=1000,
         logger=logger or SilentLogger(),
+        checks_account=True,
+        replaced=None,
     )
 
 
@@ -216,7 +218,7 @@ async def test_quotes_and_a_shioaji_broker_share_one_login_that_every_runtime_of
     shared, site = process(), shioaji_site(ShioajiServer.SIMULATION)
 
     for _ in ("startup", "reload"):
-        quotes, broker = await connect_shioaji(site, shared, CLOCK)
+        quotes, broker, _ = await connect_shioaji(site, shared, CLOCK)
         [client] = made
         client.snapshot_answers = {"2330": snapshot("2330", FRIDAY_AFTER_HOURS, 101.5, 10)}
         assert quotes is not None and broker is not None
@@ -234,7 +236,7 @@ async def test_the_simulation_server_reads_its_quotes_and_offers_sinopac_there_i
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: made.append(FakeShioaji(simulation)) or made[-1])
     site = sinopac_setup(shipped_config(), ShioajiServer.SIMULATION, environment)
 
-    quotes, broker = await connect_shioaji(site, process(), CLOCK)
+    quotes, broker, _ = await connect_shioaji(site, process(), CLOCK)
 
     [client] = made
     assert quotes is not None and broker is not None and broker.link().simulation is True
@@ -242,7 +244,7 @@ async def test_the_simulation_server_reads_its_quotes_and_offers_sinopac_there_i
 
 
 async def test_a_public_site_builds_no_shioaji_client_and_has_no_quote() -> None:
-    assert await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION, Audience.PUBLIC), process(), CLOCK) == (None, None)
+    assert await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION, Audience.PUBLIC), process(), CLOCK) == (None, None, None)
 
 
 async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_quote_and_no_sinopac(
@@ -254,7 +256,7 @@ async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_qu
         _env_file=None, **without_keys.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
     )
 
-    assert await connect_shioaji(without_keys, process(), CLOCK) == (None, None)
+    assert await connect_shioaji(without_keys, process(), CLOCK) == (None, None, None)
 
     made: list[FakeShioaji] = []
     refused = ConnectionError("Sinopac is under maintenance")
@@ -262,7 +264,7 @@ async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_qu
     shared = process()
 
     for _ in ("startup", "reload"):
-        assert await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION), shared, CLOCK) == (None, None)
+        assert (await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION), shared, CLOCK))[:2] == (None, None)
 
     assert [(len(client.logins), client.logouts) for client in made] == [(1, 0)]
 
@@ -282,7 +284,7 @@ async def test_the_runtimes_of_one_login_pace_their_requests_together(monkeypatc
     made = made_clients(monkeypatch)
     site, shared = shioaji_site(ShioajiServer.SIMULATION), process()
     site.market_data = site.market_data.model_copy(update={"quote_request_interval_seconds": 0.2})
-    (startup, _), (reload, _) = [await connect_shioaji(site, shared, CLOCK) for _ in ("startup", "reload")]
+    (startup, _, _), (reload, _, _) = [await connect_shioaji(site, shared, CLOCK) for _ in ("startup", "reload")]
     [client] = made
     client.snapshot_answers = {"2330": snapshot("2330", FRIDAY_AFTER_HOURS, 101.5, 10)}
     assert startup is not None and reload is not None
@@ -304,7 +306,7 @@ async def test_a_login_a_timed_out_reload_left_running_is_the_one_the_next_reloa
             await connect_shioaji(site, shared, CLOCK)
 
     gate.set()
-    quotes, _ = await connect_shioaji(site, shared, CLOCK)
+    quotes, _, _ = await connect_shioaji(site, shared, CLOCK)
 
     assert quotes is not None
     assert [(len(client.logins), client.logouts) for client in made] == [(1, 0)]
@@ -321,10 +323,10 @@ async def test_an_sdk_error_reaches_the_logs_and_the_run_record_as_its_type_and_
     made_clients(monkeypatch, login_error=SDK_REFUSAL)
     site = shioaji_site(ShioajiServer.SIMULATION)
     shared = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
-    assert await connect_shioaji(site, shared, CLOCK) == (None, None)
+    assert (await connect_shioaji(site, shared, CLOCK))[:2] == (None, None)
 
     made_clients(monkeypatch, market_data_error=SDK_REFUSAL)
-    quotes, _ = await connect_shioaji(site, process(), CLOCK)
+    quotes, _, _ = await connect_shioaji(site, process(), CLOCK)
     assert quotes is not None
     stack = await open_stack(tmp_path)
     stack.quotes.fetch_realtime_bars = quotes.fetch_realtime_bars

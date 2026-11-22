@@ -269,6 +269,13 @@ class FollowSchedule:
     today, and the market is in the phase orders are placed in.
     """
 
+    switched_from: RankingFormula | None
+    """
+    The formula the account's follows used before a switch of the active formula, while a follow now still tops up the
+    ranked stocks the account holds to their equal weight (FormulaSwitchRule). None outside a switch. A follow's look
+    before its valuation, its decisions and its look after its orders all read it.
+    """
+
 
 @dataclass(frozen=True)
 class FollowTimeRule:
@@ -284,9 +291,14 @@ class FollowTimeRule:
         return follow_time is not None and phase == self.pricing.trading_phase and now.time() >= follow_time
 
 
+def follow_day(follow: SystemStats, now: datetime) -> date:
+    """The market's day, in `now`'s zone, that `follow` started on."""
+    return follow.start_time.astimezone(now.tzinfo).date()
+
+
 def scheduled_since(follows: Sequence[SystemStats], day: date, now: datetime) -> list[SystemStats]:
     """The follows the schedule started from `day` on, in the market's own days, as given: oldest first."""
-    return [follow for follow in follows if follow.scheduled and follow.start_time.astimezone(now.tzinfo).date() >= day]
+    return [follow for follow in follows if follow.scheduled and follow_day(follow, now) >= day]
 
 
 def left_nothing_to_trade(follow: SystemStats) -> bool:
@@ -305,6 +317,41 @@ def unfinished_follow(follows: Sequence[SystemStats], pending: date | None, now:
 
 
 @dataclass(frozen=True)
+class FormulaSwitchRule:
+    """
+    The formula an account's ranking follows used before a switch of the active formula, `formula`, while a follow at
+    `now` still tops up the ranked stocks the account holds to their equal weight (TopUpRule), else None. `follows` are
+    the account's ranking follows, oldest first. The switch is from the formula of the last of them that took a
+    decision under another formula, whether it finished it or not. It lasts for the follows of the first `follow_days`
+    days on which a follow of the account took a decision under `formula` since and ran to its end without a failure,
+    today's included: SinoPac pays a sale two sessions after it, so the fourth day's follow has the cash of the
+    switch's sales even when the payment lands after the third day's follow. A day the account was not followed on,
+    or one whose follow failed, uses up none of them. The switch ends early at the first of its follows that left the
+    account nothing to trade (left_nothing_to_trade). So a top-up no BUY can make (no cash to spare, a gap under one
+    share at its limit with the fee, or no tolerance) is left once the window ends: the next follow tops up nothing and
+    finishes the decision, and no later follow, in later months too, tops up.
+    """
+
+    follow_days: PositiveInt
+
+    def apply(self, follows: Sequence[SystemStats], formula: RankingFormula, now: datetime) -> RankingFormula | None:
+        taken = [follow for follow in follows if follow.ranking_formula is not None]
+        others = [index for index, follow in enumerate(taken) if follow.ranking_formula != formula]
+
+        if not others:
+            return None
+
+        since = taken[others[-1] + 1 :]
+
+        if any(left_nothing_to_trade(follow) for follow in since):
+            return None
+
+        days = {follow_day(follow, now) for follow in since if follow.end_time is not None and follow.failure is None}
+
+        return taken[others[-1]].ranking_formula if len(days | {now.date()}) <= self.follow_days else None
+
+
+@dataclass(frozen=True)
 class FollowScheduleRule:
     """
     Where a user's schedule of the ranking follow stands at `now`. The decision to follow is the ranking's latest one
@@ -318,11 +365,13 @@ class FollowScheduleRule:
     and it brings the account to a formula an administrator switched to. It is due when the site offers the user their
     follow account now, the schedule may follow now (FollowTimeRule) and has started no follow yet today: a scheduled
     follow that failed, was refused or left stocks to trade is tried again on the next session, not every minute of
-    this one.
+    this one. It also says whether a follow of the account now is one of a switch of the active formula, which tops up
+    (FormulaSwitchRule, on the account's follows).
     """
 
     decision_rule: DecisionSessionsRule
     time_rule: FollowTimeRule
+    switch_rule: FormulaSwitchRule
     times: tuple[time, ...]
     formula: RankingFormula
 
@@ -351,6 +400,7 @@ class FollowScheduleRule:
             pending=pending,
             unfinished=unfinished_follow(follows, pending, now),
             due=pending is not None and account.refusal is None and not tried_today and self.time_rule.apply(follow_time, now, phase),
+            switched_from=self.switch_rule.apply(follows, self.formula, now),
         )
 
 
@@ -382,7 +432,7 @@ def ranking_sales(
 
 
 def buy_reason(ranking: Ranking, stock_id: str, switched: RankingFormula | None) -> str:
-    """A follow's BUY of `stock_id`: its place in the ranking, and for a top-up the formula switched from (switched_from)."""
+    """A follow's BUY of `stock_id`: its place in the ranking, and for a top-up the formula switched from (FormulaSwitchRule)."""
     place = next(place for place, stock in enumerate(ranking.stocks, 1) if stock.stock_id == stock_id)
     reason = f"Place {place} of {ranking_decision(ranking)}"
 
@@ -401,17 +451,6 @@ def buy_decision(rule: RankingFollowRule, stock: Stock, budget: float, reason: s
     return TradeSignal.of(stock, now, TradeAction.BUY, SignalSource.RANKING, 0, reason, quantity)
 
 
-def switched_from(follows: Sequence[SystemStats], formula: RankingFormula) -> RankingFormula | None:
-    """
-    The formula of the account's last finished ranking follow, of `follows` oldest first the last that left it nothing
-    to trade, while it is another than `formula`: the active formula was switched since, and no follow under it
-    finished. None before the account finished any follow, and once one under `formula` did.
-    """
-    finished = [follow.ranking_formula for follow in follows if left_nothing_to_trade(follow) and follow.ranking_formula is not None]
-
-    return finished[-1] if finished and finished[-1] != formula else None
-
-
 def short_of_weight(position: Position, stock: Stock | None, weight: float, tolerance: float) -> bool:
     """
     Whether `position`, at the run's price of `stock`, is worth less than `weight` by more than `tolerance` of it, or may
@@ -427,18 +466,17 @@ def short_of_weight(position: Position, stock: Stock | None, weight: float, tole
 class TopUpRule:
     """
     The ranked stocks an account holds that a ranking follow tops up to their equal weight, best first. None but on a
-    follow after a switch of the active formula: while the account's last finished ranking follow, the last of
-    `follows` (oldest first) that left it nothing to trade, used another formula than the ranking's (switched_from).
-    There, each ranked stock it holds of `positions` whose position, at its price in `priced`, is worth less than its
-    equal weight, `equity` over the ranking's stocks, by more than `tolerance` of that weight, and each without a price,
+    follow of a switch of the active formula, `switched_from` the formula switched from (FormulaSwitchRule). There,
+    each ranked stock it holds of `positions` whose position, at its price in `priced`, is worth less than its equal
+    weight, `equity` over the ranking's stocks, by more than `tolerance` of that weight, and each without a price,
     which may be. Before the run valued the account (`equity` None) every ranked stock it holds may be one, so a switch
     follow of an account that holds the ranking alone has something to follow.
 
     A follow that tops up counts each it did not buy as left to trade, so the schedule tries the decision again on the
-    next session, still a switch follow, with the cash that settled since: on SinoPac, which pays a sale at settlement,
-    the first follow after a switch may top up nothing. The tolerance keeps the mock account from buying a few shares
-    every session: a BUY sized at its limit, up to trading.limit_offset_pct above the price it fills at, leaves about
-    that share of the weight unbought, and each BUY pays a minimum fee.
+    next session, a switch follow while the switch lasts, with the cash that settled since: on SinoPac, which pays a
+    sale at settlement, the first follow after a switch may top up nothing. The tolerance keeps the mock account from
+    buying a few shares every session: a BUY sized at its limit, up to trading.limit_offset_pct above the price it
+    fills at, leaves about that share of the weight unbought, and each BUY pays a minimum fee.
     """
 
     tolerance: Fraction
@@ -447,14 +485,14 @@ class TopUpRule:
         self,
         ranking: Ranking,
         positions: Sequence[Position],
-        follows: Sequence[SystemStats],
+        switched_from: RankingFormula | None,
         priced: Mapping[str, Stock],
         equity: float | None,
     ) -> list[str]:
         held = {position.stock_id: position for position in positions}
         ranked = [stock.stock_id for stock in ranking.stocks if stock.stock_id in held]
 
-        if not ranked or switched_from(follows, ranking.formula) is None:
+        if not ranked or switched_from is None:
             return []
 
         if equity is None:
@@ -560,14 +598,13 @@ class RankingFollowRule:
     The decisions that bring an account on `broker` to the ranking at `now`, the sales first: a SELL of every share of
     each holding the ranking left, and a BUY of each ranked stock the account lacks. A ranked stock it holds already is
     left as it is, so a follow of a ranking it already holds decides nothing, and no purchase is split over sessions.
-    One follow differs: while the account's last finished follow, the last of `follows` (its ranking follows, oldest
-    first) that left it nothing to trade, used another formula than the ranking's (switched_from), the follow also tops
-    up each ranked stock the account holds that falls short of its equal weight by more than
-    ranking.top_up_tolerance_pct of it (TopUpRule), with a BUY of what its position lacks of the weight at the run's
-    price, inside the same bounds and best first. A switch from 20 stocks to 10 would otherwise sell ten and buy
-    nothing, half the account in cash until stocks rotate. A top-up the follow does not buy is left to trade, so the
-    follow does not finish the decision and the next one is a switch follow again; once a follow under the new formula
-    finished, no later one tops up.
+    The follows of a switch of the active formula differ (`switched_from`, the formula switched from, None outside a
+    switch: FormulaSwitchRule): each also tops up each ranked stock the account holds that falls short of its equal
+    weight by more than ranking.top_up_tolerance_pct of it (TopUpRule), with a BUY of what its position lacks of the
+    weight at the run's price, inside the same bounds and best first. A switch from 20 stocks to 10 would otherwise
+    sell ten and buy nothing, half the account in cash until stocks rotate. A top-up the follow does not buy is left to
+    trade, so the follow does not finish the decision and the next one tops up again while the switch lasts; once it
+    ended, no later follow tops up.
 
     Each BUY's budget is what it wants (buy_wants): the account's equity, as the run valued it, over the ranking's
     stocks, its equal weight, less what the account holds of the stock, and on a real broker no more than the most one
@@ -608,11 +645,10 @@ class RankingFollowRule:
         broker: ExecutionProvider,
         earlier_buys: Sequence[Order],
         trading_available: float | None,
-        follows: Sequence[SystemStats],
+        switched_from: RankingFormula | None,
     ) -> list[TradeSignal | str]:
         holdings = RankingHoldingsRule().apply(ranking, account.stock_ids)
-        former = switched_from(follows, ranking.formula)
-        topped_up = self.top_up_rule.apply(ranking, account.positions, follows, stocks, account.equity)
+        topped_up = self.top_up_rule.apply(ranking, account.positions, switched_from, stocks, account.equity)
         traded = [*holdings.open, *topped_up]
         priced = {stock_id: stock for stock_id in traded if (stock := stocks.get(stock_id)) and stock.current_price}
         unpriced = [f"{stock_id} has neither a realtime quote nor an official close" for stock_id in traded if stock_id not in priced]
@@ -620,7 +656,9 @@ class RankingFollowRule:
         wants = buy_wants(account, ranking, [stock_id for stock_id in [*holdings.lacking, *topped_up] if stock_id in priced])
         cash = account.cash + sum(sale_proceeds(sell, now, self.limit_price_rule, self.affordable_quantity_rule) for sell in sells)
         buys = [
-            buy_decision(self, priced[stock_id], budget, buy_reason(ranking, stock_id, former if stock_id in topped_up else None), now)
+            buy_decision(
+                self, priced[stock_id], budget, buy_reason(ranking, stock_id, switched_from if stock_id in topped_up else None), now
+            )
             for stock_id, budget in buy_budgets(self, account, broker, wants, cash).items()
         ]
         bounds = buying_bounds(self, account, broker, earlier_buys, trading_available)

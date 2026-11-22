@@ -291,7 +291,7 @@ def follow_of(
     answers = (
         harness_config()
         .ranking_follow_rule()
-        .apply(ranked("2330", "2317", "1101"), Account(cash=cash), stocks, NOW, broker, earlier, trading_available, [])
+        .apply(ranked("2330", "2317", "1101"), Account(cash=cash), stocks, NOW, broker, earlier, trading_available, None)
     )
     return [answer.stock_id for answer in answers if isinstance(answer, TradeSignal)], [a for a in answers if isinstance(a, str)]
 
@@ -345,15 +345,16 @@ THREE = replace(FORMULA, name="revenue_and_high_top3", top=3)
 
 
 def transition_of(
-    account: Account, broker: ExecutionProvider, last_finished: RankingFormula
+    account: Account, broker: ExecutionProvider, switched_from: RankingFormula | None
 ) -> tuple[list[TradeSignal], list[str], Account]:
     """
-    A follow of 2330 and 2317 into `account` after a follow under `last_finished` left it nothing to trade: its BUYs and
-    SELLs, the sentences of what waits, and the account once each order filled at its decided price.
+    A follow of 2330 and 2317 into `account`, of a switch from `switched_from` or of none: its BUYs and SELLs, the
+    sentences of what waits, and the account once each order filled at its decided price.
     """
     stocks = {stock_id: Stock(stock_id=stock_id, realtime_bar=bar(NOW, price)) for stock_id, price in CLOSES.items()}
-    earlier = follow(date(2026, 9, 14), at(date(2026, 9, 15), 9, 5), formula=last_finished)
-    answers = harness_config().ranking_follow_rule().apply(ranked("2330", "2317"), account, stocks, NOW, broker, [], None, [earlier])
+    answers = (
+        harness_config().ranking_follow_rule().apply(ranked("2330", "2317"), account, stocks, NOW, broker, [], None, switched_from)
+    )
     decisions = [answer for answer in answers if isinstance(answer, TradeSignal)]
     after = replace(account, positions=[replace(position) for position in account.positions])
     cost_rule = harness_config().market.cost_rule()
@@ -443,12 +444,12 @@ def test_after_a_switch_a_holding_short_of_its_weight_by_no_more_than_the_tolera
 
 
 @pytest.mark.parametrize("broker", list(ExecutionProvider))
-def test_a_follow_under_the_formula_of_the_last_finished_follow_tops_up_nothing(broker: ExecutionProvider) -> None:
-    """Only the first follow after a switch tops up: under the same formula a ranked stock held is left as it is."""
+def test_a_follow_outside_a_switch_tops_up_nothing(broker: ExecutionProvider) -> None:
+    """Only the follows of a switch top up: outside one a ranked stock held is left as it is."""
     held = [Position(stock_id="2330", quantity=2500, average_cost=100.0)]
     account = Account(cash=750_000.0, positions=[*held, Position(stock_id="1101", quantity=100, average_cost=30.0)])
 
-    decisions, _, _ = transition_of(account, broker, FORMULA)
+    decisions, _, _ = transition_of(account, broker, None)
 
     assert [(decision.action, decision.stock_id) for decision in decisions] == [(TradeAction.SELL, "1101"), (TradeAction.BUY, "2317")]
 

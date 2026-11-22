@@ -3,13 +3,13 @@ from collections.abc import Mapping
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.rules.trading.ranking import Ranking
-from a_domain.types.enums import Workflow
 from b_application.config.app_config import AppConfig
 
 
@@ -19,11 +19,10 @@ class RankingFollowSignals:
     at the run's latest prices (AccountValueRule) and against one reading of the clock, and record the decisions as this
     run's, so each order that follows has its decision saved first. On a real broker the decisions stay inside its BUY
     limits, which follow that equity, after the day's BUYs on it in the journal, and inside the broker's own trading
-    limit where it says one (IExecutionProvider.trading_available). The account's ranking follows in the journal, since
-    the mock account opened and ever on a real broker, say whether this is the first follow after a switch of the active
-    formula, which tops up the ranked stocks the account holds. A stock that gets no decision now is logged in the run
-    and stays open. It returns the equity, which the run's order gates hold its BUYs to, and the decisions; when
-    they cannot be saved, none, so nothing is sent.
+    limit where it says one (IExecutionProvider.trading_available). A follow of a switch of the active formula
+    (`switched_from`, as the schedule the run asked first answered it) also tops up the ranked stocks the account
+    holds. A stock that gets no decision now is logged in the run and stays open. It returns the equity, which the
+    run's order gates hold its BUYs to, and the decisions; when they cannot be saved, none, so nothing is sent.
     """
 
     def __init__(
@@ -42,15 +41,14 @@ class RankingFollowSignals:
         self._logger = logger
 
     async def execute(
-        self, ranking: Ranking, stocks: Mapping[str, Stock], account: Account, stats: SystemStats
+        self, ranking: Ranking, stocks: Mapping[str, Stock], account: Account, switched_from: RankingFormula | None, stats: SystemStats
     ) -> tuple[float, list[TradeSignal]]:
         now, broker = self._market_clock.now(), stats.execution_provider
         valued = self._value_rule.apply(account, stocks.values())
         day_start = self._market_clock.to_market_datetime(now).replace(hour=0, minute=0, second=0, microsecond=0)
         earlier_buys = await self._journal.buy_orders(broker, day_start) if broker.real else []
         trading_available = await self._execution_provider.trading_available()
-        earlier_follows = await self._journal.runs_of(Workflow.RANKING_FOLLOW, broker, account.opened_at)
-        decided = self._follow_rule.apply(ranking, valued, stocks, now, broker, earlier_buys, trading_available, earlier_follows)
+        decided = self._follow_rule.apply(ranking, valued, stocks, now, broker, earlier_buys, trading_available, switched_from)
         follows = [decision for decision in decided if isinstance(decision, TradeSignal)]
 
         for unfollowed in decided:
