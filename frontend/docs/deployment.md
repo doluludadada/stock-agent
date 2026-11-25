@@ -327,16 +327,24 @@ docker compose up -d --build
    diff -ru config /srv/stock-agent-state/config
    ```
 
-   A setting your file does not set, such as the `features` section of a file copied before it existed, runs on
-   its default without a word in the log, and a save in the settings page writes it into your file. An address
-   has no default, so a log line at the start says what the site goes without until your file sets
-   it: no sign-in with Google without Google's three addresses. Copy those from `config/appsetting.yaml`. A line
-   of its own names the prompts your `instructions.yaml` does not set: what each feeds is off until the file sets it,
-   so a stock page offers no AI brief without `stock_brief_prompt`. Copy them from `config/instructions.yaml`; the
-   site reads the file again within a few seconds, with no restart. Another line names any setting
-   your file still sets that the app no longer reads: the app ignores it, and you can delete it. If `backend` does not become healthy and `docker compose logs backend` names a setting with
-   `Field required`, that setting has no default: copy it from `config/appsetting.yaml` into your file, and run
-   `docker compose up -d` again.
+   Each setting holds its value in one place. A setting the shipped `config/appsetting.yaml` sets has no default, and
+   a setting the shipped file leaves out runs on its default without a word in the log; a save in the settings page
+   writes such a setting into your file. Two things in your file keep `backend` from becoming healthy. After the
+   line `The app would not start with the settings in config/ and .env`, `docker compose logs backend` names each:
+
+   - `Field required`: your file lacks a setting that has no default. Copy it from `config/appsetting.yaml`.
+   - `names no setting`: your file sets a setting the app no longer reads. Delete the line.
+
+   Then run `docker compose up -d` again. To see them before a restart, build the images and ask for the database's
+   status, which reads the settings first and changes nothing:
+   `docker compose build && docker compose run --rm backend python -m d_presentation.cli.database status`.
+   It names the settings the app no longer reads first, and the missing ones once those are gone.
+
+   An address is neither: the site starts without it, and a log line at the start says what the site goes without
+   until your file sets it, such as no sign-in with Google without Google's three addresses. Copy those from
+   `config/appsetting.yaml`. A line of its own names the prompts your `instructions.yaml` does not set: what each
+   feeds is off until the file sets it, so a stock page offers no AI brief without `stock_brief_prompt`. Copy them
+   from `config/instructions.yaml`; the site reads the file again within a few seconds, with no restart.
 
    The company background (the main business from MOPS, the annual reports, the company card and the site's own
    writing) is off on a file that lacks its settings, and the start names each missing one:
@@ -430,8 +438,10 @@ apt-archive.postgresql.org, so a fresh build then fails until the pin in `databa
    refresh embeds at the start. Without the command, the Web API's timer and each stock's AI brief compute the vectors
    of the stocks they reach.
 
-8. The start names `db.chroma_persist_path` as a setting the app no longer reads. Delete that line from
-   `config/appsetting.yaml` in the state folder.
+8. Delete `db.chroma_persist_path` from `config/appsetting.yaml` in the state folder: the app no longer reads it.
+   This version starts with a notice that names it. From the
+   [settings that hold each value once](#update-to-the-settings-that-hold-each-value-once), a file that still sets
+   it keeps the backend from starting.
 
 To go back to the version before, keep the database on its pgvector image: restore the backup of step 2 with
 `docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes`, then check out
@@ -497,7 +507,10 @@ order's limit where the decision's row is gone. The same version replaces the fi
 `trading.max_order_equity_pct` and `trading.max_daily_buy_equity_pct`. A `config/appsetting.yaml` that still sets the
 old limits starts with a notice that names them, so remove them. The shipped file makes `revenue_and_high_top10` the
 active formula and adds `ranking.top_up_tolerance_pct`, `shioaji.login_renewal_time` and
-`shioaji.login_retry_seconds`; a file without them takes their defaults.
+`shioaji.login_retry_seconds`; a file without them takes their defaults. From the
+[settings that hold each value once](#update-to-the-settings-that-hold-each-value-once), a file that still sets the
+old limits keeps the backend from starting, and `ranking.top_up_tolerance_pct`, `trading.limit_offset_pct` and the two
+equity limits have no default.
 
 1. Get the new version and build the images. The site keeps running.
 
@@ -549,6 +562,58 @@ refuses to start.
 
 To go back to the version before, check out the old version and rebuild only the backend with
 `docker compose up -d --no-deps --build backend`.
+
+### Update to the settings that hold each value once
+
+This update changes no schema. Each setting now holds its value in one place: `config/appsetting.yaml` sets it and the
+code has no default, or the code has the default and the shipped file leaves the setting out. A `config/appsetting.yaml`
+in the state folder that an older version started on may need two edits, and the backend does not start until it has
+both. Make them before the restart, so the site is not down while you edit.
+
+1. Get the new version and build the images. The site keeps running.
+
+   ```bash
+   git pull
+   docker compose build
+   ```
+
+2. Delete from your file every setting the app no longer reads. An older version started with a notice that named
+   them: `db.backend`, `db.chroma_persist_path`, the `strategy_search` section, `behavior.x_search_allowed_handles`,
+   `behavior.x_search_excluded_handles`, `ranking.timestamp_calendars`, `ranking.timestamp_timeout_seconds`,
+   `trading.max_order_value` and `trading.max_daily_buy_value`.
+
+3. Add each of these thirty settings that your file lacks. They had a default and have none now. The shipped file
+   sets each to the default it had, so a line copied from it changes nothing on your site.
+
+   | Where | Settings |
+   | --- | --- |
+   | top level | `environment`, `audience` |
+   | `features` | all seventeen: `market_overview`, `ranking`, `stock_pages`, `watchlist`, `valuation`, `full_cycle`, `specific_stock`, `buzz`, `intraday`, `strategy_library`, `strategy_designer`, `strategy_backtest`, `mock_account`, `sinopac_account`, `sinopac_ordering`, `holdings`, `world` |
+   | `trading` | `limit_offset_pct`, `max_order_equity_pct`, `max_daily_buy_equity_pct` |
+   | `mock_trading` | `initial_cash` |
+   | `shioaji` | `server`, `simulation_initial_cash` |
+   | `ranking` | `top_up_tolerance_pct` |
+   | `ai` | `user_selectable` |
+   | `accounts` | `public_origin`, `google_allowed_emails`, `google_administrator_emails` |
+
+4. Check your file on the new images before the restart. The command reads the settings first and changes nothing.
+   It prints the database's status when the file loads. Otherwise it names each problem with its line: first the
+   settings the app no longer reads (`names no setting`), then, once those are gone, the missing ones
+   (`Field required`).
+
+   ```bash
+   docker compose run --rm backend python -m d_presentation.cli.database status
+   ```
+
+5. Back up the database and restart the site on the new images.
+
+   ```bash
+   docker compose exec backend python -m d_presentation.cli.database backup
+   docker compose up -d
+   ```
+
+To go back to the version before, check out the old version and rebuild only the backend with
+`docker compose up -d --no-deps --build backend`. The edited file starts on that version too.
 
 ### Read the company background
 
