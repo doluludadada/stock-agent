@@ -48,6 +48,13 @@ class IMarketClock(Protocol):
         """
         ...
 
+    def next_settled_time(self) -> datetime:
+        """
+        When the next weekday session's daily bar becomes final, as last_settled_session counts it: today's while it is
+        a weekday and that time is still ahead, else the next weekday's. Exchange holidays are not modelled.
+        """
+        ...
+
     def trading_phase(self) -> TradingPhase:
         """Where the exchange's trading day stands now. Exchange holidays and a delayed open or close are not modelled."""
         ...

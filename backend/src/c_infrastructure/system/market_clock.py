@@ -111,6 +111,16 @@ class TaiwanMarketClock(IMarketClock):
         return datetime.combine(day, at, tzinfo=TAIWAN_TIMEZONE)
 
     @override
+    def next_settled_time(self) -> datetime:
+        now = self.now()
+        day = now.date() if now.time() < self._hours.settled else now.date() + timedelta(days=1)
+
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+
+        return datetime.combine(day, self._hours.settled, tzinfo=TAIWAN_TIMEZONE)
+
+    @override
     def trading_phase(self) -> TradingPhase:
         now = self.now()
 

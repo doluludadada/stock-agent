@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
@@ -449,32 +450,37 @@ async def run_steps(logger: ILoggingProvider, *steps: tuple[Callable[[], Awaitab
 
 async def collect_daily_data(switch: RuntimeSwitch) -> None:
     """
-    The Web API's collection of the daily data, at the start, then every api.archive_interval_hours of the current
-    settings, on the current runtime: first the TWSE and TPEX open data the OpenAPI serves only for its latest session,
-    day, month or quarter (closes, material information, EPS statistics, valuation ratios, balance sheets, income
-    statements, monthly revenue and TWSE news) into the archive, then, on a personal site, the exchanges' daily reports
-    of the sessions its history cache lacks, then the news of the stocks users hold or watch into the article store,
-    then, on the runtime's system writer, the site's own writing for the monthly ranking's top stocks
-    (write_for_system_stocks). A step never stops it on an error of its own: it logs it, goes on to the next and
-    tries again at the next interval. The lifespan cancels it at shutdown and waits until the step it stopped has ended.
+    The Web API's collection of the daily data, on the current runtime: the TWSE and TPEX open data the OpenAPI serves
+    only for its latest period into the archive, on a personal site the exchanges' daily reports of the sessions its
+    history cache lacks, the monthly ranking, the news of the stocks users hold or watch into the article store, and
+    the site's own writing for the ranking's top stocks (write_for_system_stocks). It runs a round at the start, then
+    at api.archive_interval_hours after the last or at the next weekday's market_hours.settled, whichever comes first.
+    It loads the ranking right after the daily history, so a new session's ranking history is built here and not in a
+    viewer's request. A step's error is logged and the next step goes on (run_steps). The lifespan cancels it at
+    shutdown and waits until the step it stopped has ended.
     """
     while True:
         with switch.hold() as opened:
-            interval = opened.runtime.config.api.archive_interval_hours
+            interval = timedelta(hours=opened.runtime.config.api.archive_interval_hours)
             pipeline = opened.runtime.signed_out
+            clock = opened.runtime.market_clock
+            # Read before the round, so a round that ends past the settle starts the next one at once.
+            settled = clock.next_settled_time()
 
             await run_steps(
                 switch.logger,
                 (pipeline.archive_daily_closes, "The open data could not be archived"),
                 (pipeline.refresh_daily_history, "The exchanges' daily history could not be refreshed"),
+                (pipeline.load_ranking, "The monthly ranking could not be loaded"),
                 (pipeline.refresh_article_store, "The article store could not be refreshed"),
                 (
                     partial(write_for_system_stocks, opened.runtime.system_writer, switch.brief_turns, switch.logger),
                     "The site's own writing could not go on",
                 ),
             )
+            wait = min(interval, settled - clock.now())
 
-        await asyncio.sleep(interval * 3600)
+        await asyncio.sleep(wait.total_seconds())
 
 
 async def collect_world(switch: RuntimeSwitch) -> None:

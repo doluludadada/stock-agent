@@ -76,9 +76,10 @@ class ApiConfig(BaseSettings):
         ),
     ] = 3
     """
-    How often the Web API saves the TWSE and TPEX open-data closes into the archive, from its start on. The OpenAPI
-    serves a session for about a day, until the next session's report, so a few hours never miss one while the server
-    runs. A save reads the listings as cached, so they are at most market_data.listing_cache_hours old.
+    How often the Web API saves the TWSE and TPEX open-data closes into the archive, from its start on, and it saves
+    them at market_hours.settled on weekdays too. The OpenAPI serves a session for about a day, until the next
+    session's report, so a few hours never miss one while the server runs. A save reads the listings as cached, so
+    they are at most market_data.listing_cache_hours old.
     """
 
 
