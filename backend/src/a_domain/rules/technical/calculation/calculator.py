@@ -226,11 +226,6 @@ def python_min(first: Floats | float, second: Floats | float) -> Floats:
     return np.where(second < first, second, first)
 
 
-def python_square(values: Floats) -> Floats:
-    """x ** 2 as CPython computes it, through the C library's pow, which can round apart from x * x; numpy squares a scalar 2."""
-    return np.power(values, np.full_like(values, 2.0))
-
-
 def trailing(values: Floats, count: int) -> list[Floats]:
     """
     The `count` values up to each bar that has as many, oldest first: the i-th array holds, for each such bar, the
@@ -251,7 +246,8 @@ def latest_sma(values: Floats, period: int) -> Floats:
 def latest_bollinger(closes: Floats, period: int, std_multiplier: float) -> Outputs:
     window = trailing(closes, period)
     middle = python_sum(window) / period
-    variance = python_sum(python_square(value - middle) for value in window) / period
+    # A product, never pow: IEEE 754 rounds a product one way, and each C library rounds pow its own.
+    variance = python_sum(np.square(value - middle) for value in window) / period
     deviation = np.sqrt(variance)
     upper = middle + (std_multiplier * deviation)
     lower = middle - (std_multiplier * deviation)

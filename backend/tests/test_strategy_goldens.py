@@ -5,6 +5,11 @@ in tests/fixtures/technical/strategy_goldens.json are cut from six daily histori
 closes repeated exactly, sessions without volume, infinite prices and windows too short for a strategy or an indicator,
 two thirds of them with a realtime quote. The strategies are the built-in one and six random ones that together read
 every output of every indicator kind with every operator; the indicators are one random and one built-in of each kind.
+
+Three readings are the kernel's own. The scalar implementation squared a Bollinger band's distances with `**`, which
+is the C library's pow, and pow rounds its last bit differently from one machine to the next; the kernel multiplies,
+which every machine rounds alike. So three cases of the 20-bar band differ from the scalar readings, by under 2e-15 of
+each value, and no report differs.
 """
 
 import hashlib
