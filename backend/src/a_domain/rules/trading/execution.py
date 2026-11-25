@@ -8,33 +8,25 @@ from pydantic.dataclasses import dataclass
 from a_domain.model.trading.account import Account, BrokerFill, Position
 from a_domain.model.trading.order import Order
 from a_domain.rules.trading.cost import TradeCost, TradingCostRule
-from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, RejectReason, TradeAction
 from a_domain.types.values import PositiveFiniteFloat
 
 
 @dataclass(frozen=True)
 class OrderAcceptanceRule:
     """
-    Why a broker adapter refuses an order from `account` before the broker sees it, whichever broker it is, or None.
-    The app tracks no working orders, so it sends only LIMIT orders whose unfilled part ends at once: IOC or FOK, never
-    ROD. Then a broker's pre-trade check at the limit price: a BUY needs the cash for the whole quantity plus fee, a SELL
-    needs the shares.
+    Why a broker adapter refuses an order from `account` before the broker sees it, whichever broker it is, or None: a
+    broker's pre-trade check at the limit price. A BUY needs the cash for the whole quantity plus fee, a SELL needs the
+    shares.
     """
 
     cost_rule: TradingCostRule
 
     def apply(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        if order.order_type != OrderType.LIMIT or order.limit_price is None:
-            return RejectReason.UNSUPPORTED_ORDER_TYPE, "the app sends LIMIT orders only"
-
-        if order.time_in_force not in {TimeInForce.IOC, TimeInForce.FOK}:
-            return (
-                RejectReason.UNSUPPORTED_TIME_IN_FORCE,
-                f"{order.time_in_force.name} would leave a working order at the broker that the app does not track",
-            )
-
         if order.action == TradeAction.BUY:
-            cost = self.cost_rule.apply(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity, now=order.created_at)
+            cost = self.cost_rule.apply(
+                TradeAction.BUY, order.stock_id, order.require_limit_price(), order.quantity, now=order.created_at
+            )
             needed = -cost.net
             refusal = RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {account.cash:,.0f}"
             return None if account.can_afford(needed) else refusal
@@ -185,7 +177,7 @@ class BrokerOutcomeRule:
     - A part the broker ended as FAILED, or whose deals cannot be the whole story, FAILS the order instead of guessing
       what executed.
     - Nothing filled and every part refused: REJECTED as BROKER_REFUSED.
-    - Anything else is CANCELLED with what filled: an IOC remainder, a FOK kill, or a refused part.
+    - Anything else is CANCELLED with what filled: an IOC remainder or a refused part.
     `unsent` says why the parts after those were never sent, when the site refused one right before its send.
     """
 

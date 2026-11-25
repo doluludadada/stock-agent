@@ -6,7 +6,7 @@ from typing import override
 
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -45,7 +45,7 @@ class DailyBarMatrixProvider(IDailyBarMatrixProvider):
     def __init__(
         self,
         stock_provider: IStockProvider,
-        ohlcv_provider: IOhlcvProvider,
+        ohlcv_provider: IPriceHistoryProvider,
         archive: IDailyCloseArchive,
         market_clock: IMarketClock,
         history_rule: RankingHistoryRule,

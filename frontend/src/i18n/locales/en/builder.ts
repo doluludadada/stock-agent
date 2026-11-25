@@ -81,10 +81,10 @@ const builder = {
   },
   scoring: {
     summary: 'Scoring: base {{base}}',
-    baseScore: 'Base score',
-    blockFailurePenalty: 'Exclusion penalty',
-    failureScoreReduction: 'Deduction',
-    passScoreIncrease: 'Bonus',
+    base_score: 'Base score',
+    block_failure_penalty: 'Exclusion penalty',
+    failure_score_reduction: 'Deduction',
+    pass_score_increase: 'Bonus',
     note: 'Passing an “exclude if failed” rule does not add points by itself.',
   },
   name: {

@@ -127,7 +127,7 @@ class SignalSource(StrEnum):
 
 class OrderType(StrEnum):
     MARKET = auto()
-    """Executes at whatever price the market gives. OrderRule never makes one, and OrderAcceptanceRule refuses it."""
+    """Executes at whatever price the market gives. OrderRule never makes one: only an old journal row holds one."""
 
     LIMIT = auto()
     """Executes at the limit price or better. OrderRule prices every order at its decision's fresh quote."""
@@ -153,7 +153,7 @@ class OrderStatus(StrEnum):
     """The whole quantity executed."""
 
     CANCELLED = auto()
-    """Stopped before the whole quantity executed (by a cancel, an IOC remainder, or a FOK kill); may hold a partial fill."""
+    """Stopped before the whole quantity executed (by a cancel or an IOC remainder); may hold a partial fill."""
 
     FAILED = auto()
     """A technical error (exception, broker unreachable), whatever state the order was in."""
@@ -241,7 +241,7 @@ class RejectReason(StrEnum):
     ORDER_VALUE_LIMIT = auto()
     """
     A real broker's BUY costs more at its limit price than trading.max_order_equity_pct of the account's equity, or has
-    no limit price or no equity to value against.
+    no equity to value against.
     """
 
     DAILY_BUY_LIMIT = auto()
@@ -266,8 +266,6 @@ class RejectReason(StrEnum):
     INSUFFICIENT_CASH = auto()
     POSITION_NOT_FOUND = auto()
     INSUFFICIENT_POSITION = auto()
-    UNSUPPORTED_ORDER_TYPE = auto()
-    UNSUPPORTED_TIME_IN_FORCE = auto()
     BROKER_REFUSED = auto()
     """The real broker refused the order before it worked (its own checks or the exchange's); the detail quotes the broker."""
 
@@ -325,7 +323,7 @@ class TradingPhase(StrEnum):
 class OrderPricing(StrEnum):
     """
     What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.
-    Audience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.
+    Audience.order_pricing picks one; OrderRule and the follow's window read it, and nothing else decides by it.
     """
 
     REALTIME_QUOTE = auto()
@@ -1316,31 +1314,16 @@ class RuleEffect(StrEnum):
 
 
 class EpsKind(StrEnum):
-    SINGLE_QUARTER = auto()
     CUMULATIVE = auto()
-    ANNUAL = auto()
     TRAILING_TWELVE_MONTHS = auto()
 
     @property
     def label(self) -> str:
         match self:
-            case EpsKind.SINGLE_QUARTER:
-                return "single quarter"
             case EpsKind.CUMULATIVE:
                 return "cumulative"
-            case EpsKind.ANNUAL:
-                return "annual"
             case EpsKind.TRAILING_TWELVE_MONTHS:
                 return "TTM"
-
-
-class EpsBasis(StrEnum):
-    ACTUAL = auto()
-    ESTIMATE = auto()
-
-    @property
-    def label(self) -> str:
-        return "actual" if self == EpsBasis.ACTUAL else "estimate"
 
 
 class FinancialStatement(StrEnum):

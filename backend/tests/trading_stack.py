@@ -49,11 +49,12 @@ from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.users_orders import SqlUsersOrders
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
+from c_infrastructure.market.shioaji_quote_provider import ShioajiSession
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.system.settings_files import SettingsFiles
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
-from d_presentation.dependencies import OwnedPorts, ProviderDependencies, compose_runtime, create_owned_ports
+from d_presentation.dependencies import OwnedPorts, ProcessState, ProviderDependencies, compose_runtime, create_owned_ports
 
 MONDAY_10_00 = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 
@@ -80,7 +81,7 @@ class MovableClock(TaiwanMarketClock):
 
 @dataclass
 class QuoteFeed:
-    """IOhlcvProvider with prices the test sets: one realtime bar and a daily history per stock."""
+    """IPriceHistoryProvider and IRealtimeQuoteProvider with prices the test sets: one realtime bar and a daily history per stock."""
 
     realtime: dict[str, Ohlcv] = field(default_factory=dict)
     daily: dict[str, list[Ohlcv]] = field(default_factory=dict)
@@ -214,8 +215,7 @@ async def open_stack(
         users_stocks=FakeUsersStocks(),
         users_orders=SqlUsersOrders(db),
         broker_quotes=quotes,
-        shioaji=connection,
-        shioaji_client=connection.client,
+        shioaji=ShioajiSession(connection, connection.client),
         daily_close_archive=archive,
         fundamentals_provider=FakeFundamentalsProvider(),
         company_basics_provider=None,
@@ -226,12 +226,12 @@ async def open_stack(
         conversation_repository=FakeConversationRepository(),
         notification_provider=None,
         platform_provider=None,
-        settings_files=SettingsFiles(project_root=UNUSED_PROJECT_ROOT, max_bytes=1, backups_kept=1, running=config, logger=logger),
+        settings_files=SettingsFiles(project_root=UNUSED_PROJECT_ROOT, max_bytes=1, backups_kept=1, logger=logger),
         user_store=users,
-        attempt_log=MemoryAttemptLog(),
         real_broker=real_broker,
         ordering_switch=FakeOrderingSwitch(config.features, config.shioaji.server),
         owned_ports=owned_ports,
+        process=ProcessState(logger, MemoryAttemptLog(), asyncio.Lock()),
     )
     runtime = compose_runtime(config, logger, clock, dependencies)
     runtime.become_current()

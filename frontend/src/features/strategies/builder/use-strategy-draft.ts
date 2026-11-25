@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { useBlocker } from 'react-router'
 import { isApiError, type FieldProblem } from '@/shared/api'
 import { useKeptDraft } from '@/shared/lib/kept-draft'
+import { useLeaveGuard } from '@/shared/lib/leave-guard'
 import { newIds, ruleIndexOf } from '../api/mapping'
 import { useSaveStrategySettings, useStrategySettings } from '../api/queries'
 import { applyEdit, copyStrategy, createBlankStrategy, pruneEditorIndicators, type StrategyEdit } from '../model/edit'
@@ -80,10 +80,9 @@ export function useStrategyDraft(initial: Strategy, name: string) {
   const [lastSaved, setLastSaved] = useState(initial)
   const kept = useMemo(() => new Set(Object.keys(initial.indicators)), [initial])
   const dirty = JSON.stringify(state.draft) !== state.baseline
-  const dirtyRef = useRef(dirty)
+  const { blocker, release } = useLeaveGuard(dirty, 'leaves')
   const latestDraft = useRef(state.draft)
   useEffect(() => {
-    dirtyRef.current = dirty
     latestDraft.current = state.draft
     keptDraft.track(dirty ? state.draft : null)
   }, [dirty, state.draft, keptDraft])
@@ -102,7 +101,7 @@ export function useStrategyDraft(initial: Strategy, name: string) {
     if (isRefusal(next)) return { ok: false, reason: 'full' }
     try {
       const saved = await mutation.mutateAsync(next)
-      dirtyRef.current = latestDraft.current !== state.draft
+      if (latestDraft.current === state.draft) release('route')
       setConflict(false)
       dispatch({ type: 'saved', from: state.draft, sent: strategy })
       setLastSaved(saved.strategies.find((item) => item.id === strategy.id) ?? strategy)
@@ -119,22 +118,13 @@ export function useStrategyDraft(initial: Strategy, name: string) {
       }
       return { ok: false, reason: 'failed', error }
     }
-  }, [issues, sent, mutation, settings, state.draft])
+  }, [issues, sent, mutation, settings, state.draft, release])
 
   /** True when the server's copy of this strategy changed since this draft last read or saved it. */
   const serverChanged = useMemo(() => {
     const current = settings.data?.strategies.find((item) => item.id === lastSaved.id)
     return conflict && current !== undefined && JSON.stringify(current) !== JSON.stringify(lastSaved)
   }, [conflict, lastSaved, settings.data])
-
-  useEffect(() => {
-    if (!dirty) return
-    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault()
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [dirty])
-
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirtyRef.current && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search))
 
   return {
     draft: state.draft,

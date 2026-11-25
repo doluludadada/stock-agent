@@ -77,12 +77,7 @@ export interface Rule {
   condition: ConditionGroup
 }
 
-export interface Scoring {
-  baseScore: number
-  blockFailurePenalty: number
-  failureScoreReduction: number
-  passScoreIncrease: number
-}
+export type Scoring = Schemas['TechnicalScoring']
 
 export interface Strategy {
   id: StrategyId

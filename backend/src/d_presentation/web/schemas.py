@@ -39,7 +39,6 @@ from a_domain.types.enums import (
     AiProvider,
     Audience,
     EliminationReason,
-    EpsBasis,
     EpsKind,
     ErrorCode,
     ExecutionProvider,
@@ -838,12 +837,11 @@ class ExplanationRequest(Confirmed):
 
 
 class EpsResponse(Response):
-    """An EPS figure (Eps): it never comes without its period, kind, basis, source and fetch time."""
+    """An EPS figure (Eps): it never comes without its period, kind, source and fetch time."""
 
     value: float
     kind: EpsKind
     period_label: str
-    basis: EpsBasis
     source: InformationSource
     fetched_at: datetime
 

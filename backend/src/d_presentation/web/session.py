@@ -103,9 +103,8 @@ async def request_hold(switch: RuntimeSwitchDependency) -> AsyncGenerator[Opened
     """
     The runtime this request runs on, held from its first dependency to its answer. FastAPI solves a dependency once
     per request, so the host check, the session, the gates and the route all read one runtime, whatever a reload does
-    meanwhile, and the Pipeline a run gets comes from the runtime its gates read. No login is made on a request's path,
-    so no request waits for SinoPac: the timer of the scheduled follows renews the Shioaji login
-    (RuntimeSwitch.log_in_again), within api.follow_schedule_poll_seconds of the moment it is due.
+    meanwhile, and the Pipeline a run gets comes from the runtime its gates read. No request makes a Shioaji login
+    (Runtime.login_due), so none waits for SinoPac.
     """
     with switch.hold() as opened:
         yield opened

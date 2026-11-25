@@ -320,7 +320,7 @@ async def test_a_login_that_went_down_stops_the_requests_of_the_source() -> None
     harness = site()
 
     async with serve(harness) as client:
-        harness.dependencies.shioaji.lost(harness.dependencies.shioaji.client)
+        harness.dependencies.shioaji.connection.lost(harness.dependencies.shioaji.client)
         answer = (await client.get(QUOTES, params={"ids": ["2330"]})).json()
 
     assert answer["realtime_quotes"] is False and answer["quotes"] == {"2330": None}

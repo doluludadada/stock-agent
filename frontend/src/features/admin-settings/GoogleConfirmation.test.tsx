@@ -5,11 +5,10 @@ import { I18nextProvider } from 'react-i18next'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { Toaster } from 'sonner'
 import { initI18n } from '@/i18n'
-import { session } from '@/shared/api'
+import { session, startGoogleConfirmation, takePendingSave } from '@/shared/api'
 import { TEST_ADMIN } from '@/test/users'
 import { AdminSettingsPage } from './AdminSettingsPage'
 import type { SettingField } from './form'
-import { startGoogleConfirmation, takePendingSave } from './googleConfirmation'
 
 const GOOGLE_ONLY_ADMIN = { ...TEST_ADMIN, has_password: false }
 const STORAGE_KEY = 'stock-agent.settings-confirmation'
@@ -42,6 +41,13 @@ function fakeServer(granted: string | null) {
     return json([{ ...TEMPERATURE, value: 0.3 }])
   })
   return { saves, fetch }
+}
+
+/** Whether closing or reloading the tab now asks the browser's own question. */
+function unloadAsks() {
+  const leaving = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(leaving)
+  return leaving.defaultPrevented
 }
 
 function renderPage(server: ReturnType<typeof fakeServer>, entry = '/admin/settings') {
@@ -88,6 +94,24 @@ describe('a settings save by an administrator without a password', { timeout: 30
     const dialog = await screen.findByRole('alertdialog', { name: 'Save the settings?' })
     expect(within(dialog).getByRole('button', { name: 'Confirm with Google' })).toBeVisible()
     expect(within(dialog).queryByLabelText('Your password')).not.toBeInTheDocument()
+  })
+
+  it('lets the browser go to Google without asking, and still asks before a link leaves the change while the page stays', async () => {
+    const user = userEvent.setup({ delay: null })
+    const router = renderPage(fakeServer(null))
+
+    fireEvent.change(await screen.findByRole('slider', { name: 'Temperature' }), { target: { value: '0.3' } })
+    expect(unloadAsks()).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(within(await screen.findByRole('alertdialog', { name: 'Save the settings?' })).getByRole('button', { name: 'Confirm with Google' }))
+
+    // jsdom loads no other document ("Not implemented: navigation"), so the page stays, as one the back button
+    // brings from the bfcache.
+    expect(takePendingSave()?.changes).toEqual([{ path: 'ai.temperature', value: 0.3 }])
+    expect(unloadAsks()).toBe(false)
+    void router.navigate('/account/sinopac')
+    expect(await screen.findByRole('alertdialog', { name: 'Leave this page?' })).toBeVisible()
+    expect(router.state.location.pathname).toBe('/admin/settings')
   })
 
   it('keeps the changes under a fresh id while the browser goes to the start of the confirmation', () => {

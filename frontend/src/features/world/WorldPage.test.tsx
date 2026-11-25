@@ -188,7 +188,7 @@ describe('the world as the site holds it', () => {
     open()
 
     expect(screen.getByText('Sign in to read the world brief and news')).toBeInTheDocument()
-    expect(asked).toEqual([])
+    expect(asked.filter((url) => url !== '/v1/auth/status'), 'only whether the site takes registrations, which the sign-in prompt says').toEqual([])
   })
 
   it('gives the home page the indicators, the brief’s first sentences and the way to the page', async () => {

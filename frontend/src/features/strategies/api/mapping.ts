@@ -1,6 +1,5 @@
 import type { Schemas } from '@/shared/api'
 import { randomHex } from '@/shared/lib/random-id'
-import { DEFAULT_SCORING } from '../model/edit'
 import type {
   Condition,
   ConditionGroup,
@@ -95,12 +94,7 @@ export function strategyFromApi(strategy: ApiStrategy): Strategy {
     name: strategy.name,
     indicators: structuredClone(strategy.indicators) as Record<IndicatorId, IndicatorConfig>,
     rules,
-    scoring: {
-      baseScore: strategy.scoring.base_score ?? DEFAULT_SCORING.baseScore,
-      blockFailurePenalty: strategy.scoring.block_failure_penalty ?? DEFAULT_SCORING.blockFailurePenalty,
-      failureScoreReduction: strategy.scoring.failure_score_reduction ?? DEFAULT_SCORING.failureScoreReduction,
-      passScoreIncrease: strategy.scoring.pass_score_increase ?? DEFAULT_SCORING.passScoreIncrease,
-    },
+    scoring: { ...strategy.scoring },
   }
 }
 
@@ -133,12 +127,7 @@ export function strategyToApi(strategy: Strategy): ApiStrategyInput {
     strategy_id: strategy.id,
     name: strategy.name.trim(),
     indicators: structuredClone(strategy.indicators),
-    scoring: {
-      base_score: strategy.scoring.baseScore,
-      block_failure_penalty: strategy.scoring.blockFailurePenalty,
-      failure_score_reduction: strategy.scoring.failureScoreReduction,
-      pass_score_increase: strategy.scoring.passScoreIncrease,
-    },
+    scoring: { ...strategy.scoring },
     rules: strategy.rules.map((rule) => ({ name: rule.name.trim(), effect: rule.effect, condition: conditionToApi(rule.condition) })),
   }
 }

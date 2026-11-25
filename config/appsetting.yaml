@@ -91,11 +91,6 @@ ranking:
   # price, so the mock account keeps about that much of each weight as cash; without this a follow would buy a few
   # shares every session at the NT$20 fee floor. 0 to 1.
   top_up_tolerance_pct: 0.1
-  # On how many days after a switch the follows top up, counted by the days a follow under the new formula took the
-  # decision and ended without a failure, the first included. SinoPac pays a sale two sessions later, so the fourth
-  # day's follow has the cash of the switch's sales. A top-up none of them could buy (no cash to spare, a gap under
-  # one share with the fee) is left, and the next follow finishes the decision. Only an operator sets it. 1 to 20.
-  top_up_follow_days: 4
   # The formulas the ranking can be made by. Each ranks its factors among its universe's stocks and holds the `top` best
   # sums of ranks in equal weights. Adding one is an entry here, of these factors:
   #   revenue_acceleration  the mean revenue of the latest short_months over that of the latest long_months
@@ -142,11 +137,6 @@ ranking:
           long_months: 12
         - kind: nearness_to_high
           high_sessions: 250
-  # The ranking page compares every formula over the same period, and a second time with this liquidity floor in place
-  # of its own min_traded_value.
-  evidence_min_traded_value: 200000000
-  # How many replays of the ranking the site keeps in memory while the history they read stays the same.
-  kept_backtests: 24
   # The revenue trend of the stock page and of My holdings: the mean revenue of the latest revenue_short_months over that
   # of the latest revenue_long_months.
   revenue_short_months: 3
@@ -158,15 +148,6 @@ ranking:
   # and the sessions a year its annual return counts.
   benchmark_id: "0050"
   sessions_per_year: 245
-
-folder:
-  news_archive_dir: "news_archive"
-  buzz_archive_dir: "buzz_archive"
-  ai_response_dir: "ai_responses"
-
-tavily:
-  search_depth: basic
-  connection_timeout: 30
 
 analysis:
   # Daily history is fetched by calendar days, but a strategy counts trading days (bars). About 1.5 calendar days pass
@@ -193,19 +174,6 @@ analysis:
   # A public site reads no news site: its AI step reads the material information the open-data archive holds of a
   # stock from this many days back, and decides a stock with none on its technical score alone, without an AI call.
   material_information_days: 30
-
-notifications:
-  enabled: false
-  recipients: []
-
-# The Buzz report's social sentiment. Report only: it never changes signals or orders.
-sentiment:
-  # A post classified with less confidence than this counts as unclear.
-  min_confidence: 0.5
-  # With fewer bullish, bearish or neutral posts than this, the stock's consensus is unclear.
-  min_opinions: 2
-  # The share of the opinions one stance needs to be the consensus. Above one half, so only one stance can reach it.
-  consensus_share: 0.6
 
 collect_rules:
   spam_keywords:
@@ -239,35 +207,7 @@ collect_rules:
     - "[標的]"
     - "[新聞]"
 
-quality:
-  min_chars_stock: 100
-  min_chars_news: 200
-  min_chars_gossip: 50
-
 stock_page:
-  # A stock's page: its financial analysis reads held data only. On a personal site its news and board posts are
-  # fetched when a page asks, then served again for this many minutes before the news sites and PTT are asked anew.
-  news_freshness_minutes: 30
-  # The stocks whose fetched news and posts stay in memory, the most recently asked first.
-  news_held_stocks: 300
-  # The sessions of a valuation ratio the page needs before it compares the latest with their median.
-  valuation_min_sessions: 60
-  # How many of the latest quarters the page reads the EPS of from the MOPS pages a personal site holds
-  # (`just backfill-history` brings them back).
-  eps_quarters: 12
-  brief:
-    # The page's AI brief: what the company is and how the held facts of a recent window relate to the stock's move.
-    # One is written per stock and Taiwan calendar day for the whole site, when a signed-in viewer asks for it; every
-    # later viewer reads the stored one. Its prompt is stock_brief_prompt in config/instructions.yaml.
-    # How many stocks may get a new brief per Taiwan calendar day at viewers' requests, for all users together. The
-    # briefs the site writes by itself (system_writing below) take none of them.
-    daily_stocks: 30
-    # The language every brief is written in: zh-TW or en.
-    language: zh-TW
-    # The latest sessions whose price move a brief describes.
-    window_sessions: 20
-    # What it says about the stock it searches for in the article store (article_store below), with the queries
-    # stock_brief_rise_query, stock_brief_fall_query and stock_brief_company_query of config/instructions.yaml.
   system_writing:
     # The site's own writing. Once a session's daily data is held, the Web API's timer makes sure each stock of the
     # monthly ranking's top (ranking.top) has its company card and the day's brief, after reading the company's main
@@ -276,33 +216,6 @@ stock_page:
     # stock_page.brief.daily_stocks. This is how many paid AI calls it may make per Taiwan calendar day: a brief is
     # one, and a card one more when it is written. 0, and a file that does not set it, turn the site's own writing off.
     daily_ai_calls: 60
-  article_store:
-    # What the site read about each stock is kept so that it accumulates: announcements and TWSE news with their text,
-    # and on a personal site news articles and PTT posts. Articles enter when a stock page asks for the stock's news,
-    # when the Web API's timer reads the stocks users hold or watch, and with
-    # `just backfill-articles`. Each has a vector, computed on the server, that finds it by meaning.
-    # An article published longer ago than this many days is dropped.
-    retention_days: 730
-    # The most articles kept of one stock, the newest first.
-    max_per_stock: 300
-
-world:
-  # The world outside Taiwan's exchanges: the items of the world news feeds named under sources.world, kept in the
-  # article store with the title and the summary each feed gives, never an article's page; the world indicators' daily
-  # readings; and the day's world brief. The Web API's world timer reads the feeds every api.world_interval_minutes.
-  # features.world shows the world page; off, nothing is read or written.
-  # A world news item published longer ago than this many days is dropped. A brief keeps the items it cites.
-  retention_days: 14
-  brief:
-    # The day's world brief: what moved in the held indicators and which held world news may bear on Taiwan's market,
-    # one per Taiwan calendar day, written by the site's own writing on ai.system_model. It spends one of
-    # stock_page.system_writing.daily_ai_calls a day, so a budget of 0 writes none. Its prompt is world_brief_prompt in
-    # config/instructions.yaml, and its language stock_page.brief.language.
-    # The Taiwan time from which the day's brief is written: after the United States session's close and its yields,
-    # before the Taiwan open.
-    write_at: "07:30"
-    # The hours of world news before its writing a brief reads.
-    window_hours: 24
 
 market:
   fee_rate: 0.001425
@@ -325,80 +238,6 @@ market:
   # A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float: a float32
   # price source serves 28.35 as 28.350000381469727.
   tick_float_tolerance: "0.01"
-
-freshness:
-  # Realtime quotes older than this never price an order.
-  realtime_max_lag_minutes: 15
-  # Daily history whose last bar is older than this is not analysed.
-  history_max_lag_days: 10
-  # The run error for daily histories that lack the last settled session names at most this many stocks.
-  missing_session_listed_stocks: 10
-  # An official close that prices a P/E valuation is stale once more weekday sessions than this have closed after
-  # its session. One is tolerated because the exchanges publish a day's close hours after 13:30.
-  daily_close_max_missed_sessions: 1
-
-# The regular TWSE and TPEx trading day, Asia/Taipei time, Monday to Friday. Orders are taken from the opening
-# auction; the closing call auction takes limit ROD orders only.
-market_hours:
-  opening_auction_start: "08:30"
-  continuous_start: "09:00"
-  # The intraday odd-lot session takes limit ROD orders from 09:00 and matches them by call auction, the first match at
-  # odd_lot_start (09:00 to 09:15) and then every odd_lot_match_seconds (at most 10) until the close. A SinoPac order's
-  # odd-lot part is sent right after its board-lot part and stays working until the later of then and the first match,
-  # plus shioaji.odd_lot_matches intervals and half of one. TWSE plans to move the first match to 09:00 (set
-  # odd_lot_start to "09:00" when it does) and the interval to 1 second.
-  odd_lot_start: "09:10"
-  odd_lot_match_seconds: 5
-  closing_auction_start: "13:25"
-  close: "13:30"
-  # A session's daily bar is final in every price source from this time: the after-hours fixed-price session ends at
-  # 14:30, and a source may publish the session's bars later still.
-  settled: "15:00"
-
-# How the price and listing adapters pace, batch and cache their requests.
-market_data:
-  # Shioaji realtime quotes: at most 500 stocks per snapshots request, and 50 market-data queries per 10 s, after which
-  # it stops answering for a minute.
-  quote_batch_size: 500
-  quote_request_interval_seconds: 0.2
-  quote_timeout_seconds: 10.0
-  # The quotes the pages show while a session trades (GET /v1/market/quotes) are held once for every page and user:
-  # one snapshots request, of at most quote_batch_size stocks, at most every page_quote_refresh_seconds, for the stocks
-  # a page asked for in the last page_quote_idle_seconds. A stock that has no quote yet may bring the next request
-  # forward to page_quote_first_seconds after the last. So the stocks cost Shioaji 1 query per 10 s as shipped, and 5
-  # at the most, of the 50 it allows; an order's quote is asked for itself and waits for no page. Once a session is
-  # over and its last quotes are read, an open page asks again every page_quote_recheck_seconds, which costs Shioaji
-  # nothing. One request of a page names at most quote_batch_size stocks.
-  page_quote_refresh_seconds: 10
-  page_quote_first_seconds: 2
-  page_quote_idle_seconds: 60
-  page_quote_recheck_seconds: 300
-  # The market overview's index while a session trades (GET /v1/market/index-quotes), for a signed-in viewer: one more
-  # snapshots request, of the index contracts alone, in the round that reads the pages' stocks, so at most every
-  # page_quote_refresh_seconds whatever the number of open tabs, and only while a tab asks. With it the pages cost
-  # Shioaji 2 queries per 10 s as shipped (1 while only the market overview is open) and 10 at the most, of the 50 it
-  # allows. One tab left on the home page for a whole session asks 1,621 times, each for one contract: 1,620 in the
-  # 4.5 hours from 09:00 to 13:30 and once after the close. Nothing is asked for an index before 09:00, when it still
-  # stands at the previous close. Each index is read from Shioaji's Contracts.Indexs[exchange][symbol].
-  quote_index_contracts:
-    taiex:
-      exchange: TSE
-      symbol: TSE001
-  # Daily history on a personal site, from the exchanges' own reports of each date (sources.exchange.daily_reports):
-  # one request per exchange and session for every listed stock, and two per exchange and month for its index. TWSE
-  # refuses an address for minutes after more than about 3 requests in 5 seconds, so each site is asked at most once
-  # this often, from every runtime together.
-  history_request_interval_seconds: 3.0
-  history_timeout_seconds: 30.0
-  # Sessions the Web API's timer keeps for every stock: the stock page's one-year chart (250 sessions and the one
-  # before them). A strategy that needs older sessions fetches them when it runs.
-  history_backfill_bars: 251
-  # A question the exchanges answered with nothing new, such as a session they do not serve yet, or one that failed,
-  # as every request does while a site refuses the address, is asked again at most this often.
-  history_retry_hours: 2
-  # The TWSE and TPEX listings, with each stock's latest official close.
-  listing_cache_hours: 6
-  listing_timeout_seconds: 30.0
 
 trading:
   # Buzz, Intraday and a manual BUY order on the account their run chose when it started: the user's mock account, the
@@ -476,15 +315,6 @@ accounts:
   google_issuer: https://accounts.google.com
   google_authorization_endpoint: https://accounts.google.com/o/oauth2/v2/auth
   google_token_endpoint: https://oauth2.googleapis.com/token
-  # Seconds the token endpoint may take to answer.
-  google_timeout_seconds: 10
-  # Minutes a browser may take at Google between the start of a sign-in and its return.
-  google_flow_minutes: 10
-  # An administrator without a password confirms a save of the settings by signing in to Google again. Seconds that
-  # authentication may be old, and seconds the confirmation then waits for its save.
-  google_fresh_authentication_seconds: 300
-  # Seconds Google's clock and the server's may differ when an ID token's times are checked.
-  google_clock_skew_seconds: 30
 
 # The Shioaji login of a personal site: its realtime quotes, and the SinoPac orders of the runs that choose SinoPac.
 # The credentials come from the environment or .env only: the simulation server reads SHIOAJI_API_KEY_TEST and
@@ -501,48 +331,12 @@ shioaji:
   poll_interval_seconds: 0.5
   # Reads of an order's status before a working order is cancelled, and again after the cancel request.
   max_polls: 10
-  # Seconds SinoPac may take to refresh the status of every order of the account today, asked once by each read of
-  # its cash or today's deals: the SinoPac page, a run's account and a ranking follow. A day of many orders takes
-  # longer than the SDK's own 5 seconds. The lookups for an order whose answer was lost take at most this in all. 5 to 60.
-  status_timeout_seconds: 30
-  # The intraday odd-lot matches (market_hours.odd_lot_match_seconds apart, at most 10) an odd-lot ROD part stays working
-  # through after the session's first match, its status read after each, before what is left is cancelled. A run
-  # cancelled meanwhile (Ctrl-C, or the server stopping) cancels it at once and sends nothing more. The board-lot IOC
-  # part keeps max_polls.
-  odd_lot_matches: 3
-  # Seconds, at most 30, the broker may take to settle a cancel and the reads after it. Past them the order is recorded
-  # unconfirmed, and SinoPac's record of the day settles it later. compose.yml's stop_grace_period covers it.
-  cancel_timeout_seconds: 15
-  # The time of each market day, Taipei, from which a login made before it is stale: the timer of the scheduled follows
-  # logs in again on a new client within a minute of it, and the CLI at its next round. SinoPac does not say how long a
-  # login lasts; it refused one 26 hours old. After SinoPac's nightly maintenance and past 08:00, when a login reads the
-  # day's contracts and their price bands, before the opening auction takes orders at 08:30.
-  login_renewal_time: "08:15"
-  # Seconds, 10 to 3600, between two logins after one failed, so a SinoPac that does not answer is not asked at once.
-  login_retry_seconds: 60
-  # Seconds, 10 to 86400 and at least login_retry_seconds, of the longest wait between two logins that failed one after
-  # another: each wait is twice the one before, up to this, so a SinoPac that refuses for hours is asked every quarter
-  # of an hour, on one new client each time, not every minute.
-  login_retry_max_seconds: 900
   # The cash SinoPac's simulation account started with, all of it the owner has put in. That server reports no
   # balance, so the site figures the account's cash from this and SinoPac's records (SimulationCashRule): adding money
   # to the simulation account is raising this.
   simulation_initial_cash: 1000000
 
-holdings:
-  # The largest stocks whose share of the holdings' value the My holdings page shows as the concentration.
-  concentration_positions: 3
-  # How many days back the SinoPac account page asks the broker for the sales it settled.
-  realized_days: 90
-
-watchlist:
-  # A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow last
-  # selected it. 1 keeps Friday evening's Full Cycle entries through Monday's session.
-  automatic_expiry_sessions: 1
-
 valuation:
-  scenario_spread: 0.2
-  max_scan_explanations: 3
   # The sentences of the valuation report (menus 5 and 6).
   not_investment_advice: "This report is only a valuation estimate based on a specified P/E and a summary of the data. It is not investment advice. The result depends on the assumed P/E and is not an objective true value."
   low_pe_caveat: "A low P/E can reflect falling earnings growth, one-off gains that inflate EPS, or market and industry risk; a low P/E alone is not a buy signal."
@@ -1058,7 +852,7 @@ sources:
 
 # Whom the site shows each feature to: off (nobody), administrators, or everyone (every signed-in user; a page that
 # needs no sign-in stays open to a visitor). The Web API refuses a hidden feature's requests, and the web app hides its
-# pages. A save in the settings page applies at once. A file without this section runs on these same defaults.
+# pages. A save in the settings page applies at once.
 features:
   market_overview: everyone
   ranking: everyone

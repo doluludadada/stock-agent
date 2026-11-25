@@ -3,9 +3,9 @@ import { useId, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError, useAccountLabel, useAudience, type Audience, type Broker } from '@/shared/api'
+import { useAccountLabel, useAudience, type Audience, type Broker } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { useErrorReason } from '@/shared/lib/error-reason'
+import { useFollowRefusal } from '@/shared/lib/error-reason'
 import { clockTime, DASH, useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
@@ -217,12 +217,6 @@ function StockLine({ label, stockIds }: { label: string; stockIds: string[] }) {
   )
 }
 
-const REFUSALS: Record<string, 'runs:follow.refused.window' | 'runs:follow.refused.quotes' | 'runs:busy'> = {
-  outside_follow_window: 'runs:follow.refused.window',
-  realtime_quotes_unavailable: 'runs:follow.refused.quotes',
-  run_in_progress: 'runs:busy',
-}
-
 /** The lead's words; an account that holds the ranking has none. */
 function useLeadText(lead: FollowLead): string | null {
   const { t } = useTranslation('ranking')
@@ -264,7 +258,7 @@ interface ActionProps {
  */
 function Action({ follow, ranking, audience }: ActionProps) {
   const { t } = useTranslation('ranking')
-  const reason = useErrorReason()
+  const refusal = useFollowRefusal()
   const start = useFollowRanking()
   const [confirming, setConfirming] = useState(false)
   const leadId = useId()
@@ -281,11 +275,7 @@ function Action({ follow, ranking, audience }: ActionProps) {
     setConfirming(false)
     start.mutate(broker, {
       onSuccess: () => toast.success(t('runs:follow.started')),
-      onError: (error) => {
-        const code = isApiError(error) ? error.code : null
-        const own = code === 'nothing_to_follow' ? t(`follow.on.${broker}.upToDate`) : code && REFUSALS[code] ? t(REFUSALS[code]) : null
-        toast.error(own ?? t('runs:follow.failed', { reason: reason(error) }))
-      },
+      onError: (error) => toast.error(refusal(error, t(`follow.on.${broker}.upToDate`))),
     })
   }
 

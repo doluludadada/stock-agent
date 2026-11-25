@@ -9,10 +9,9 @@ from pydantic import ConfigDict, Field, NonNegativeFloat, PositiveFloat, compute
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.trading.ranking_formula import RankingFormula
-from a_domain.rules.technical.matrix import Flags, Floats
 from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingRule, Ranking, RankingHistory
 from a_domain.types.errors import BacktestPeriodUnavailable
-from a_domain.types.values import NonEmptyText, max_drawdown
+from a_domain.types.values import Flags, Floats, NonEmptyText, max_drawdown
 
 type Curve = Annotated[dict[date, float], Field(min_length=1)]
 

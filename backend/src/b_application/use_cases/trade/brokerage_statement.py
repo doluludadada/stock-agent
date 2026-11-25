@@ -22,7 +22,7 @@ class BrokerageStatementReader:
 
     def __init__(
         self,
-        brokerage: IBrokerExecutionProvider[Any, Any] | None,
+        brokerage: IBrokerExecutionProvider[Any] | None,
         users_orders: IUsersOrders,
         market_clock: IMarketClock,
         config: AppConfig,

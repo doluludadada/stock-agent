@@ -6,6 +6,7 @@ settings a runtime was built from never change under the work that holds it.
 """
 
 import asyncio
+from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -116,36 +117,20 @@ def startup_problems(error: Exception, logger: ILoggingProvider) -> list[Setting
     return [SettingsProblem(message=f"The app would not start: {type(error).__name__}. The server log has the details.")]
 
 
-class BriefTurns:
-    """
-    One writer at a time per stock, in one process, whichever runtime a request holds. Writing a stock's brief first
-    reads the company's main business and annual report where they are due and writes its card, which can take a
-    minute. A second request for the same stock, a viewer's or the timer's, waits for the first and then finds that
-    work done, so nothing is fetched or written twice.
-    """
-
-    def __init__(self) -> None:
-        self._turns: dict[str, asyncio.Lock] = {}
-
-    def of(self, stock_id: str) -> asyncio.Lock:
-        """The stock's turn: hold it from the request for the stock's brief to its answer."""
-        return self._turns.setdefault(stock_id, asyncio.Lock())
-
-
 class RuntimeSwitch:
     """
     The runtimes this process has open, oldest first; the last is current. New requests, runs and CLI options hold the
     current one. A reload opens a whole new runtime from the settings files first (the startup itself, the database and
     the broker login included), and only when it started appends it and retires the one before, which closes once
-    nothing holds it. One lock serializes the reloads, the saves and the renewals of the Shioaji login; taking a hold
-    never waits for it, and no request takes it for a login: the timer of the scheduled follows and the CLI's rounds
-    renew the login (log_in_again). It also keeps the turns of the stocks whose brief is being written, which outlive
-    any one runtime.
+    nothing holds it. One lock serializes the reloads, the saves and the login renewals (log_in_again); taking a hold
+    never waits for it.
     """
 
     def __init__(self, opener: RuntimeOpener, project_root: Path, logger: ILoggingProvider) -> None:
         self.logger = logger
-        self.brief_turns = BriefTurns()
+        # One writer of a stock's brief at a time, whichever runtime a request holds: a second request for the stock
+        # waits for the first and finds its card and its company's reads done, so nothing is fetched or written twice.
+        self.brief_turns: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.opener = opener
         self.project_root = project_root
         self.lock = asyncio.Lock()
@@ -200,16 +185,11 @@ class RuntimeSwitch:
 
     async def log_in_again(self) -> bool:
         """
-        The renewal of the site's Shioaji login, by its one caller per process: each look of the timer of the scheduled
-        follows on the Web API, and each CLI round, never a request. Once it is due (Runtime.login_due: the login failed
-        or went down, the latest is on another client, or it is stale, made before the market day's
-        shioaji.login_renewal_time, and not within the wait after a failed one), a runtime opens on the settings the
-        current one runs on, never on the files on disk, so a new login never switches SinoPac's server or any other
-        setting, and logs in past the current one's client on a new client (ShioajiQuoteProvider.connect). True when it
-        became current, which it does only when it serves no less (serves_no_less): the next run and read use the new
-        login, and a run under way keeps its runtime, and so its client, to its end. Otherwise it closes and the current
-        one serves on; one whose login came up without the SinoPac it needed counts as a failed login. A login that
-        outlasts api.settings_build_timeout_seconds goes on, counts as no failure, and the next look takes it up.
+        Makes the Shioaji login again once it is due (Runtime.login_due): opens a runtime on the current one's settings,
+        never on the files on disk, past its client, and makes it current only when it serves no less (serves_no_less),
+        so a run under way keeps its client to its end. Otherwise it closes, and one whose login came up without the
+        SinoPac it needed counts as a failed login; a login that outlasts api.settings_build_timeout_seconds goes on and
+        counts as no failure. True when it became current.
         """
         if not self.opened[-1].runtime.login_due:
             return False
@@ -221,7 +201,7 @@ class RuntimeSwitch:
                 return False
 
             timeout = current.config.api.settings_build_timeout_seconds
-            opened = await opened_within(self.opener, current.config, current.shioaji_client, timeout, self.logger)
+            opened = await opened_within(self.opener, current.config, current.shioaji.client, timeout, self.logger)
 
             if opened is None:
                 self.logger.warning("The Shioaji login was not made again: the runtime before serves on")
@@ -236,7 +216,7 @@ class RuntimeSwitch:
             await opened.exit_stack.aclose()
 
             if came_up:
-                current.shioaji.failed(current.market_clock.now())
+                current.shioaji.connection.failed(current.market_clock.now())
 
             self.logger.warning("The Shioaji login was not made again: the runtime before serves on")
             return False
@@ -519,23 +499,19 @@ async def collect_world(switch: RuntimeSwitch) -> None:
         await asyncio.sleep(interval * 60)
 
 
-async def write_for_system_stocks(pipeline: Pipeline | None, turns: BriefTurns, logger: ILoggingProvider) -> None:
+async def write_for_system_stocks(pipeline: Pipeline | None, turns: defaultdict[str, asyncio.Lock], logger: ILoggingProvider) -> None:
     """
-    The timer's last step, on the runtime's system writer (Runtime.system_writer), which is None, and the step
-    nothing, while the site's own writing is off: for each stock the site still writes for by itself now
-    (Pipeline.load_system_writing), one after another, each in the stock's turn, what a viewer's request for its brief
-    does (Pipeline.write_stock_brief): its main business and annual report read when due, its company card written
-    when it has none or what it rests on changed, and the day's brief, on the site's own AI budget and never on a
-    user's allowance. A stock that fails is logged and the next one goes on. A spent budget ends the step until the
-    next interval, where the round goes on with the stocks still without a brief. It sends no order: neither operation
-    has an order step.
+    The timer's last step, on the runtime's system writer, None while the site's own writing is off: each stock the site
+    still writes for by itself (Pipeline.load_system_writing) written in its turn as a viewer's request would
+    (Pipeline.write_stock_brief). A stock that fails is logged and the next goes on; a spent budget ends the step until
+    the next interval.
     """
     if pipeline is None:
         return
 
     for stock_id in await pipeline.load_system_writing():
         try:
-            async with turns.of(stock_id):
+            async with turns[stock_id]:
                 await pipeline.write_stock_brief(stock_id)
         except AiAllowanceSpentError as error:
             logger.info(f"The site's own writing stops for now at {stock_id}: {error}")

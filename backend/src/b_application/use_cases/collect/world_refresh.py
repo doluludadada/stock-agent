@@ -5,12 +5,11 @@ from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepo
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketScope
 from b_application.config.app_config import AppConfig
-from b_application.schemas.collect import WorldUpdate
 
 
 class WorldRefresh:
     """
-    Reads the world into what the site holds, and says how many world news items it added or replaced, how many it
+    Reads the world into what the site holds, and logs how many world news items it added or replaced, how many it
     embedded and how many indicator readings are new: the items the world news feeds list now, kept in the article
     store under MarketScope.WORLD with the summary each feed gives (KeptArticleRule), within world.retention_days and
     world.max_items, then their vectors brought in line with the kept items, so a lost index fills again here; and the
@@ -37,9 +36,9 @@ class WorldRefresh:
         self._max_items = config.world.max_items
         self._kept_rule = config.stock_page.article_store.kept_rule(config.audience.news_articles)
 
-    async def execute(self) -> WorldUpdate:
+    async def execute(self) -> None:
         if self._feed is None:
-            return WorldUpdate(0, 0, 0)
+            return
 
         world = MarketScope.WORLD.value
         items = [self._kept_rule.apply(item) for item in await self._feed.fetch_news() if item.publication_known]
@@ -53,5 +52,3 @@ class WorldRefresh:
 
         readings = await self._indicators.save(await self._feed.fetch_indicators())
         self._logger.info(f"World: {kept} news items kept, {embedded} embedded, {readings} indicator readings new.")
-
-        return WorldUpdate(kept, embedded, readings)

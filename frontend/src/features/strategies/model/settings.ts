@@ -7,17 +7,6 @@ import type { Strategy, StrategyId, StrategySettings } from './types'
  * from, because the server replaces the settings as a whole and refuses a stale revision (409).
  */
 
-/**
- * The developer's strategies in config/strategies; an owner strategy may keep one of these ids. A saved copy of a
- * built-in that no longer ships (`conservative`, `aggressive`) is one of the owner's own strategies.
- */
-export const BUILT_IN_IDS = ['balanced'] as const
-export type BuiltInId = (typeof BUILT_IN_IDS)[number]
-
-export function isBuiltInId(id: string): id is BuiltInId {
-  return (BUILT_IN_IDS as readonly string[]).includes(id)
-}
-
 export type SettingsRefusal = 'selected' | 'last' | 'full'
 
 const sameStrategy = (left: Strategy, right: Strategy) => JSON.stringify(strategyToApi(left)) === JSON.stringify(strategyToApi(right))

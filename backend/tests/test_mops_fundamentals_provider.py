@@ -1,7 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 from support.databases import open_database
@@ -65,7 +64,7 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
         db=db,
         market_clock=clock,
         mops=SOURCES.mops,
-        listing=cast(Any, None),
+        monthly_revenue=SOURCES.exchange.monthly_revenue,
         logger=SilentLogger(),
         write_lock=asyncio.Lock(),
         pace=RequestPace(),

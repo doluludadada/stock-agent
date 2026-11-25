@@ -11,7 +11,7 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.news_provider import INewsProvider
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider, IRealtimeQuoteProvider
 from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType
 from a_domain.types.values import FiscalQuarter
 
@@ -116,7 +116,7 @@ class ArchivedMonth:
     companies: Annotated[int, Field(ge=0)]
 
 
-class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
+class IDailyCloseArchive(IPriceHistoryProvider, IRealtimeQuoteProvider, INewsProvider, Protocol):
     """
     What the TWSE and TPEX OpenAPI publish under the Open Government Data License v1 but serve only for their latest
     session, day, month or quarter, so that a public site may show what it computes from them: every session's official

@@ -1,7 +1,7 @@
 import { ReceiptText, Unplug, Wallet } from 'lucide-react'
-import { useMemo, type ComponentType } from 'react'
+import { useMemo } from 'react'
 import { useTranslation } from '@/i18n'
-import { isApiError, useListedNames, type SaveConfirmationProps } from '@/shared/api'
+import { isApiError, useListedNames } from '@/shared/api'
 import { DASH, useFormat } from '@/shared/lib/format'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { StockLink } from '@/shared/ui/stock-name'
@@ -20,16 +20,16 @@ import { TradesPanel } from './Trades'
 
 /**
  * The SinoPac account: its server, its login and whether the site may order there lead, managed there by an
- * administrator through `Confirmation`, the settings save's confirmation the route hands in; then the account as the
- * broker reports it while the site's login is up, which the page only reads.
+ * administrator through the settings save; then the account as the broker reports it while the site's login is up,
+ * which the page only reads.
  */
-export function BrokerageAccountPage({ Confirmation }: { Confirmation: ComponentType<SaveConfirmationProps> }) {
+export function BrokerageAccountPage() {
   const { t } = useTranslation('account')
   return (
     <div className="page-stack">
       <PageHeader title={t('page.shioaji.title')} />
       <RequireSignIn layout="page" needs="use_real_broker" reason={t('brokerage.signIn')}>
-        <Brokerage Confirmation={Confirmation} />
+        <Brokerage />
       </RequireSignIn>
     </div>
   )
@@ -39,7 +39,7 @@ export function BrokerageAccountPage({ Confirmation }: { Confirmation: Component
  * A read SinoPac did not answer (broker_not_answering) fails the whole answer. Once an answer came, its server, login
  * and switches stay on the page through a later failed read, which then takes the statement's place with its retry.
  */
-function Brokerage({ Confirmation }: { Confirmation: ComponentType<SaveConfirmationProps> }) {
+function Brokerage() {
   const { t } = useTranslation('account')
   const account = useBrokerageAccount()
   const retry = () => void account.refetch()
@@ -50,7 +50,7 @@ function Brokerage({ Confirmation }: { Confirmation: ComponentType<SaveConfirmat
   const down = loginState(account.data) === 'down'
   return (
     <div className="card-stack">
-      <SinoPacPanel account={account.data} Confirmation={Confirmation} />
+      <SinoPacPanel account={account.data} />
       {account.isRefetchError ? (
         <ErrorState error={account.error} title={t('brokerage.loadFailed')} onRetry={retry} framed />
       ) : statement ? (

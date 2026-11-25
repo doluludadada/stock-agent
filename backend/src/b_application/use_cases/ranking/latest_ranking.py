@@ -3,8 +3,7 @@ from dataclasses import replace
 from pydantic import PositiveInt
 
 from a_domain.ports.market.stock_provider import IStockProvider
-from a_domain.rules.trading.ranking import Ranking, RankingHistory
-from a_domain.types.errors import RankingUnavailable
+from a_domain.rules.trading.ranking import Ranking, RankingHistory, latest_decision
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
 
@@ -25,15 +24,7 @@ class LatestRanking:
 
     async def execute(self, history: RankingHistory, top: PositiveInt | None = None, formula_name: FormulaId | None = None) -> Ranking:
         ranking_rule = self._ranking_rule(formula_name)
-        decisions = self._decision_rule.apply(history.bars.sessions)
-
-        if not decisions:
-            raise RankingUnavailable(
-                f"No ranking can be made yet: the daily history holds {history.bars.sessions[0]} to {history.bars.sessions[-1]}, "
-                "and no decision session."
-            )
-
-        column, revenue_month = decisions[-1]
+        column, revenue_month = latest_decision(self._decision_rule, history.bars.sessions)
         names = {stock.stock_id: stock.name for stock in await self._stock_provider.get_all()}
 
         rule = ranking_rule if top is None else replace(ranking_rule, formula=replace(ranking_rule.formula, top=top))

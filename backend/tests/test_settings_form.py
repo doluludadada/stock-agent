@@ -3,7 +3,7 @@ The settings form's fields, from the settings classes and the files of config/, 
 text in place: every other line, comment and key as it was, and the value read back as written.
 """
 
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from a_domain.ports.system.settings_files import SettingChange, SettingField
 from a_domain.types.enums import AiProvider, InstructionKey, SettingGroup, SettingKind, SettingsFile, SettingUnit
 from a_domain.types.errors import SettingsEditError
+from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.settings_loader import (
     InvalidSettingsError,
     load_settings,
@@ -26,7 +27,6 @@ from b_application.config.settings_loader import (
     with_change,
     with_changes,
 )
-from b_application.config.trading_config import TradingConfig
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -163,6 +163,32 @@ def test_a_map_of_number_keys_is_written_back_with_number_keys() -> None:
 
     assert "  stock_ticks: {0: '0.01', 10: '0.05', 50: '0.1', 100: '0.5', 500: '1', 1000: '10'}\n" in after
     assert yaml.safe_load(after)["market"]["stock_ticks"][1000] == "10"
+
+
+LEFT_TO_THEIR_DEFAULTS = {
+    "market_data.quote_batch_size": 200,
+    "stock_page.brief.language": "en",
+    "world.brief.write_at": "07:45",
+    "notifications.recipients": ["owner"],
+    "ranking.evidence_min_traded_value": 100_000_000,
+    "shioaji.status_timeout_seconds": 60,
+    "accounts.google_flow_minutes": 15,
+}
+"""
+Settings the shipped file leaves to their defaults, one of each place a save writes one: under a section the file
+lacks, under a section the file lacks inside one it has, under two it lacks, and after the last setting of a section
+it has.
+"""
+
+
+def test_a_setting_the_shipped_file_leaves_to_its_default_is_saved_into_the_file() -> None:
+    texts = repository_texts()
+    after = edited(texts, *LEFT_TO_THEIR_DEFAULTS.items())
+    shown, saved = values(after), load_settings(PROJECT, after)
+
+    assert not {path for path in LEFT_TO_THEIR_DEFAULTS if f"{path.rsplit('.', 1)[1]}:" in texts[SettingsFile.APPSETTING]}
+    assert {path: shown[path] for path in LEFT_TO_THEIR_DEFAULTS} == LEFT_TO_THEIR_DEFAULTS
+    assert (saved.market_data.quote_batch_size, saved.world.brief.write_at) == (200, time(7, 45))
 
 
 def test_a_change_to_the_value_its_field_shows_writes_nothing() -> None:
@@ -343,71 +369,54 @@ def test_a_value_on_disk_that_is_none_of_the_steps_shows_and_survives_a_save_of_
     assert after[SettingsFile.APPSETTING] == custom.replace("max_daily_buy_equity_pct: 1.1", "max_daily_buy_equity_pct: 1.5", 1)
 
 
-def test_a_file_without_a_setting_added_since_starts_on_its_default_and_the_start_says_nothing_of_it(tmp_path: Path) -> None:
-    shipped = repository_texts()[SettingsFile.APPSETTING]
-    older = shipped[: shipped.index("\n# Whom the site shows each feature to")]
-    project = project_with(tmp_path, older)
-    notices = settings_notices(project)
-
-    assert "features:" in shipped and "features:" not in older
-    assert load_settings(project).features == load_settings(PROJECT).features
-    assert not [notice for notice in notices if "features." in notice]
+def test_the_shipped_file_leaves_every_setting_with_a_default_to_it_and_the_start_says_nothing_of_them() -> None:
+    assert "market_data:" not in repository_texts()[SettingsFile.APPSETTING]
+    assert load_settings(PROJECT).market_data == MarketDataConfig()
+    assert settings_notices(PROJECT) == []
 
 
-def test_a_file_that_still_sets_a_retired_setting_starts_and_the_start_names_it(tmp_path: Path) -> None:
-    shipped = repository_texts()[SettingsFile.APPSETTING]
-    older = shipped.replace("  enable_x_search: false\n", "  enable_x_search: false\n  x_search_allowed_handles: [twse]\n", 1)
-    project = project_with(tmp_path, older)
+def test_a_file_without_a_setting_that_has_no_default_is_refused_naming_it(tmp_path: Path) -> None:
+    older = repository_texts()[SettingsFile.APPSETTING].replace("  world: everyone\n", "", 1)
 
-    assert older != shipped
-    assert load_settings(project).behavior == load_settings(PROJECT).behavior
-    assert settings_notices(project)[0] == (
-        "appsetting.yaml still sets behavior.x_search_allowed_handles: the app no longer reads them. Remove them from the file."
-    )
-    assert "x_search" not in "".join(settings_notices(PROJECT))
+    with pytest.raises(InvalidSettingsError, match="features.world: Field required"):
+        load_settings(project_with(tmp_path, older))
 
-
-@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
-def test_a_file_that_still_chooses_a_database_backend_starts_on_postgresql_and_the_start_names_the_setting(
-    tmp_path: Path, backend: str
-) -> None:
-    older = f"{repository_texts()[SettingsFile.APPSETTING]}\ndb:\n  backend: {backend}\n"
-    project = project_with(tmp_path, older)
-
-    assert load_settings(project).db == load_settings(PROJECT).db
-    assert settings_notices(project)[0] == (
-        "appsetting.yaml still sets db.backend: the app no longer reads them. Remove them from the file."
-    )
-    assert "db.backend" not in "".join(settings_notices(PROJECT))
-
-
-RETIRED_VECTOR_FOLDER = '  chroma_persist_path: "chroma_data"\n'
-"""The one setting of the db section before schema version 14, which the deployment notes say to delete."""
 
 DB_SECTION_BEFORE_VERSION_14 = (
     "db:\n"
     "  # The PostgreSQL database is named by DB_USER, DB_PASSWORD, DB_HOST, DB_PORT and DB_NAME in .env: the app refuses to\n"
     "  # start without them.\n"
-    f"{RETIRED_VECTOR_FOLDER}"
+    '  chroma_persist_path: "chroma_data"\n'
 )
 """The db section as config/appsetting.yaml shipped it before schema version 14."""
 
 
-def test_a_file_from_before_schema_version_14_starts_and_the_start_names_its_retired_db_setting(tmp_path: Path) -> None:
-    project = project_with(tmp_path, f"{repository_texts()[SettingsFile.APPSETTING]}\n{DB_SECTION_BEFORE_VERSION_14}")
+@pytest.mark.parametrize(
+    ("after", "setting", "path"),
+    [
+        ("  enable_x_search: false\n", "  x_search_allowed_handles: [twse]\n", "behavior.x_search_allowed_handles"),
+        ("  sessions_per_year: 245\n", "  timestamp_timeout_seconds: 10\n", "ranking.timestamp_timeout_seconds"),
+        ("  max_daily_buy_equity_pct: 1.1\n", "  max_order_value: 100000\n", "trading.max_order_value"),
+        ("  initial_cash: 1000000\n", "\nstrategy_search:\n  workers: 8\n", "strategy_search"),
+        ("  initial_cash: 1000000\n", f"\n{DB_SECTION_BEFORE_VERSION_14}", "db.chroma_persist_path"),
+    ],
+    ids=["x-search-handles", "ranking-timestamps", "fixed-buy-limits", "strategy-search", "vector-folder"],
+)
+def test_a_setting_the_app_no_longer_reads_is_refused_at_its_line(tmp_path: Path, after: str, setting: str, path: str) -> None:
+    older = repository_texts()[SettingsFile.APPSETTING].replace(after, f"{after}{setting}", 1)
+    key = path.rsplit(".", 1)[-1]
+    line = older[: older.index(f"{key}:")].count("\n") + 1
 
-    assert load_settings(project).db == load_settings(PROJECT).db
-    assert settings_notices(project)[0] == (
-        "appsetting.yaml still sets db.chroma_persist_path: the app no longer reads them. Remove them from the file."
-    )
+    with pytest.raises(InvalidSettingsError, match=f"appsetting.yaml line {line}, column [0-9]+, {path}: names no setting"):
+        load_settings(project_with(tmp_path, older))
 
 
 @pytest.mark.parametrize(
     "section",
-    [DB_SECTION_BEFORE_VERSION_14.replace(RETIRED_VECTOR_FOLDER, ""), "db:\n", "db: {}\n"],
+    [DB_SECTION_BEFORE_VERSION_14.replace('  chroma_persist_path: "chroma_data"\n', ""), "db:\n", "db: {}\n"],
     ids=["comments-left", "nothing-left", "empty-braces"],
 )
-def test_a_db_section_left_empty_by_deleting_the_retired_setting_starts_saves_and_names_nothing(tmp_path: Path, section: str) -> None:
+def test_a_db_section_that_holds_no_setting_starts_saves_and_names_nothing(tmp_path: Path, section: str) -> None:
     project = project_with(tmp_path, f"{repository_texts()[SettingsFile.APPSETTING]}\n{section}")
     saved = edited(settings_texts(project), ("notifications.recipients", ["owner"]))
 
@@ -416,69 +425,25 @@ def test_a_db_section_left_empty_by_deleting_the_retired_setting_starts_saves_an
     assert not [notice for notice in settings_notices(project) if "db." in notice]
 
 
-TRADING_SECTION_BEFORE_THE_EQUITY_LIMITS = (
-    "trading:\n"
-    "  # Most one SinoPac BUY may cost at its limit price, in NT$.\n"
-    "  max_order_value: 100000\n"
-    "  # Most the SinoPac BUYs of one Taiwan calendar day may cost together.\n"
-    "  max_daily_buy_value: 300000\n"
-)
-"""A deployed trading section that set only the two fixed NT$ limits, which the shares of the equity replaced."""
-
-
 @pytest.mark.parametrize(
-    "section",
-    [TRADING_SECTION_BEFORE_THE_EQUITY_LIMITS, "trading:\n  # Most one SinoPac BUY may cost at its limit price, in NT$.\n", ""],
-    ids=["retired-limits", "emptied-by-removing-them", "absent"],
+    ("section", "refusal"),
+    [
+        (
+            "trading:\n  # Most one SinoPac BUY may cost at its limit price, in NT$.\n",
+            "line [0-9]+, column 1, trading: Input should be",
+        ),
+        ("", "trading: Field required"),
+    ],
+    ids=["emptied", "absent"],
 )
-def test_a_trading_section_that_set_only_the_retired_limits_starts_on_the_defaults_once_they_are_removed(
-    tmp_path: Path, section: str
+def test_a_file_whose_trading_section_sets_nothing_is_refused_since_no_limit_has_a_default(
+    tmp_path: Path, section: str, refusal: str
 ) -> None:
     shipped = repository_texts()[SettingsFile.APPSETTING]
     start, end = shipped.index("\ntrading:\n") + 1, shipped.index("\nmock_trading:\n") + 1
-    project = project_with(tmp_path, f"{shipped[:start]}{section}{shipped[end:]}")
-    saved = edited(settings_texts(project), ("trading.limit_offset_pct", 0.01))
 
-    assert load_settings(project).trading == load_settings(PROJECT).trading == TradingConfig()
-    assert load_settings(project, saved).trading.limit_offset_pct == 0.01
-    retired = [notice for notice in settings_notices(project) if "trading." in notice]
-    assert retired == (
-        [
-            "appsetting.yaml still sets trading.max_order_value, trading.max_daily_buy_value: the app no longer reads them. "
-            "Remove them from the file."
-        ]
-        if "max_order_value" in section
-        else []
-    )
-
-
-def test_a_file_that_still_sets_the_rankings_timestamp_settings_starts_and_the_start_names_them(tmp_path: Path) -> None:
-    shipped = repository_texts()[SettingsFile.APPSETTING]
-    retired = '  timestamp_calendars:\n    - "https://a.pool.opentimestamps.org"\n  timestamp_timeout_seconds: 10\n'
-    older = shipped.replace("  sessions_per_year: 245\n", f"  sessions_per_year: 245\n{retired}", 1)
-    project = project_with(tmp_path, older)
-
-    assert older != shipped
-    assert load_settings(project).ranking == load_settings(PROJECT).ranking
-    assert settings_notices(project)[0] == (
-        "appsetting.yaml still sets ranking.timestamp_calendars, ranking.timestamp_timeout_seconds: "
-        "the app no longer reads them. Remove them from the file."
-    )
-    assert "timestamp" not in "".join(settings_notices(PROJECT))
-
-
-def test_a_file_that_still_sets_the_strategy_search_section_starts_and_the_start_names_it(tmp_path: Path) -> None:
-    shipped = repository_texts()[SettingsFile.APPSETTING]
-    retired = "strategy_search:\n  workers: 8\n  levels:\n    price: [0.95, 1.0, 1.05]\n  folder: strategy_searches\n\n"
-    older = shipped.replace("ranking:\n", f"{retired}ranking:\n", 1)
-    project = project_with(tmp_path, older)
-
-    assert older != shipped
-    assert load_settings(project).model_dump() == load_settings(PROJECT).model_dump()
-    assert settings_notices(project)[0] == (
-        "appsetting.yaml still sets strategy_search: the app no longer reads them. Remove them from the file."
-    )
-    assert "strategy_search" not in "".join(settings_notices(PROJECT))
+    with pytest.raises(InvalidSettingsError, match=refusal):
+        load_settings(project_with(tmp_path, f"{shipped[:start]}{section}{shipped[end:]}"))
 
 
 def test_an_instructions_file_without_a_prompt_added_since_starts_without_it_and_the_start_names_it(tmp_path: Path) -> None:
@@ -510,11 +475,11 @@ def test_a_key_that_was_never_a_setting_is_still_refused_at_its_line(tmp_path: P
         load_settings(project)
 
 
+GOOGLE_REQUIRED = ["public_origin", "google_administrator_emails", "google_allowed_emails"]
+"""The settings of sign-in with Google with no code default: every file sets them, or it does not start."""
+
 ADDED_SINCE = {
     "accounts": [
-        "public_origin",
-        "google_administrator_emails",
-        "google_allowed_emails",
         "google_issuer",
         "google_authorization_endpoint",
         "google_token_endpoint",
@@ -525,19 +490,18 @@ ADDED_SINCE = {
     ],
     "stock_page": ["news_freshness_minutes", "news_held_stocks", "valuation_min_sessions", "eps_quarters"],
 }
-"""The settings of sign-in with Google and the stock page, which a deployment's older file lacks."""
+"""The other settings of sign-in with Google and the stock page, which a deployment's older file lacks."""
 
 
-def test_a_deployments_older_file_starts_on_the_defaults_and_the_start_says_what_the_site_goes_without(
+def test_an_older_file_starts_and_says_what_the_site_goes_without_and_one_without_a_required_setting_does_not(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     document = yaml.safe_load(repository_texts()[SettingsFile.APPSETTING])
 
-    for section, names in ADDED_SINCE.items():
-        for name in names:
-            del document[section][name]
+    for name in ADDED_SINCE["accounts"]:
+        document["accounts"].pop(name, None)
 
-    del document["features"], document["stock_page"]
+    del document["stock_page"]
     project = project_with(tmp_path, yaml.safe_dump(document, allow_unicode=True, sort_keys=False))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
@@ -549,24 +513,32 @@ def test_a_deployments_older_file_starts_on_the_defaults_and_the_start_says_what
 
     assert not older.accounts.google_sign_in
     assert not older.stock_page.system_writing.enabled and own_writing.enabled
-    assert (older.stock_page.model_copy(update={"system_writing": own_writing}), older.features) == (
-        shipped.stock_page,
-        shipped.features,
-    )
+    assert older.stock_page.model_copy(update={"system_writing": own_writing}) == shipped.stock_page
     assert writing == (
         "appsetting.yaml does not set stock_page.system_writing.daily_ai_calls: the site writes no company card and no brief by "
         "itself until it does. The shipped appsetting.yaml has them."
     )
-    assert older.accounts.google_flow_minutes == shipped.accounts.google_flow_minutes
     assert google == (
         "appsetting.yaml does not set accounts.google_issuer, accounts.google_authorization_endpoint, "
         "accounts.google_token_endpoint: the site offers no sign-in with Google until it does. The shipped appsetting.yaml has them."
     )
 
+    for name in GOOGLE_REQUIRED:
+        del document["accounts"][name]
+
+    (tmp_path / "oldest").mkdir()
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        load_settings(project_with(tmp_path / "oldest", yaml.safe_dump(document, allow_unicode=True, sort_keys=False)))
+
+    assert all(f"accounts.{name}: Field required" in str(refused.value) for name in GOOGLE_REQUIRED), str(refused.value)
+
 
 def test_the_settings_of_google_and_the_stock_page_get_a_control_and_only_the_emails_are_typed() -> None:
     fields = {field.path: field for field in repository_fields()}
-    paths = [f"{section}.{name}" for section, names in ADDED_SINCE.items() for name in names]
+    paths = [f"accounts.{name}" for name in GOOGLE_REQUIRED] + [
+        f"{section}.{name}" for section, names in ADDED_SINCE.items() for name in names
+    ]
     added = {path: fields[path] for path in paths if path in fields}
     typed = {path for path, field in added.items() if field.kind.typed}
 

@@ -1,27 +1,34 @@
-import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
+import { siteShowing } from '@/test/features'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
-import { AuthLinksProvider, RequireSignIn } from './require-sign-in'
+import { RequireSignIn } from './require-sign-in'
 
-function renderGate(needs?: 'manage_users') {
+function renderGate(needs?: 'manage_users', registrationOpen = true) {
+  const status = { ...siteShowing(), registration_open: registrationOpen }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(status), { headers: { 'Content-Type': 'application/json' } })))
   return render(
     <I18nextProvider i18n={initI18n('en')}>
       <MemoryRouter initialEntries={['/watchlist?sort=code']}>
-        <AuthLinksProvider value={{ signIn: (next) => `/sign-in?next=${encodeURIComponent(next)}`, register: '/register' }}>
+        <QueryClientProvider client={new QueryClient()}>
           <RequireSignIn needs={needs} reason="Sign in to see your watchlist" layout="page">
             <p>private rows</p>
           </RequireSignIn>
-        </AuthLinksProvider>
+        </QueryClientProvider>
       </MemoryRouter>
     </I18nextProvider>,
   )
 }
 
 describe('a private page', () => {
-  afterEach(() => session.signOut())
+  afterEach(() => {
+    session.signOut()
+    vi.unstubAllGlobals()
+  })
 
   it('asks a visitor to sign in and come back, or to create an account, with no token or unlock in sight', () => {
     session.signOut()
@@ -32,6 +39,14 @@ describe('a private page', () => {
     expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register')
     expect(screen.queryByText('private rows')).toBeNull()
     expect(document.body.textContent).not.toMatch(/token|unlock/i)
+  })
+
+  it('offers no account to create while the site takes no registrations', async () => {
+    session.signOut()
+    renderGate(undefined, false)
+
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeVisible()
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Create account' })).toBeNull())
   })
 
   it('says the session ended when the server ended it', () => {

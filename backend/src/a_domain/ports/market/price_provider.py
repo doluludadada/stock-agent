@@ -48,10 +48,6 @@ class IRealtimeQuoteProvider(Protocol):
         ...
 
 
-class IOhlcvProvider(IPriceHistoryProvider, IRealtimeQuoteProvider, Protocol):
-    """Daily history for analysis and realtime quotes for orders: what the workflows read."""
-
-
 class IQuoteBoard(Protocol):
     """
     The realtime quotes the pages show, held once for every page and user of a runtime, so the number of requests the

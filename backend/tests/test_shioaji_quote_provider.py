@@ -253,7 +253,8 @@ async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_qu
     """A reload right after the failed login logs in no sooner than shioaji.login_retry_seconds later."""
     without_keys = shioaji_site(ShioajiServer.SIMULATION)
     without_keys.shioaji = ShioajiConfig(
-        _env_file=None, **without_keys.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
+        _env_file=None,
+        **without_keys.shioaji.model_dump(include={"server", "poll_interval_seconds", "max_polls", "simulation_initial_cash"}),
     )
 
     assert await connect_shioaji(without_keys, process(), CLOCK) == (None, None, None)

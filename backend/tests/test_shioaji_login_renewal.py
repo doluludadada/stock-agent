@@ -31,7 +31,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import ExecutionProvider, OrderStatus, ShioajiServer
 from a_domain.types.errors import BrokerNotAnswering
 from b_application.config.app_config import AppConfig
-from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider, ShioajiSession
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.trading.shioaji import execution_provider
@@ -253,8 +253,10 @@ async def test_a_new_login_that_succeeds_after_the_timers_look_stopped_waiting_i
         stale = await page_quote(switch)
 
         with switch.hold() as before:
-            connection, broker = before.runtime.shioaji, before.runtime.real_broker
-            assert connection is not None and connection.login is not None and broker is not None
+            session, broker = before.runtime.shioaji, before.runtime.real_broker
+            assert session is not None and broker is not None
+            connection = session.connection
+            assert connection.login is not None
             up_while_pending = broker.link().up
             slow.set()
             await asyncio.shield(connection.login)
@@ -410,8 +412,9 @@ async def test_a_runtime_whose_sinopac_kept_the_client_before_a_login_that_came_
     checked = ShioajiExecutionProvider.connect
 
     async def checked_while_the_renewal_comes_up(broker: ShioajiExecutionProvider) -> None:
-        connection = switch.opened[-1].runtime.shioaji
-        assert connection is not None and connection.login is not None
+        session = switch.opened[-1].runtime.shioaji
+        assert session is not None and session.connection.login is not None
+        connection = session.connection
         slow.set()
         await asyncio.shield(connection.login)
         await checked(broker)
@@ -556,7 +559,7 @@ def sinopac_runtime(harness: CliHarness, connection: ShioajiConnection) -> Runti
     login = harness.config.shioaji.login()
     assert login is not None
     broker = ShioajiExecutionProvider(connection, connection.client, login, harness.config, harness.clock, harness.logger)
-    dependencies = replace(harness.dependencies, real_broker=broker, shioaji=connection, shioaji_client=connection.client)
+    dependencies = replace(harness.dependencies, real_broker=broker, shioaji=ShioajiSession(connection, connection.client))
     return runtime_for(replace(harness, dependencies=dependencies), harness.config)
 
 

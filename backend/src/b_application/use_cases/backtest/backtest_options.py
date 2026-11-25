@@ -1,5 +1,5 @@
 from a_domain.model.trading.backtest import BacktestInputs
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.rules.trading.backtest import BacktestPeriodRule
 from b_application.config.app_config import AppConfig
@@ -13,7 +13,7 @@ class BacktestOptions:
     window. It reads which sessions the history holds and loads no bar.
     """
 
-    def __init__(self, ohlcv_provider: IOhlcvProvider, config: AppConfig) -> None:
+    def __init__(self, ohlcv_provider: IPriceHistoryProvider, config: AppConfig) -> None:
         self._ohlcv_provider = ohlcv_provider
         self._history_days = config.analysis.history_days
         self._period_rule = BacktestPeriodRule()

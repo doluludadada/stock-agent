@@ -2,14 +2,15 @@
 
 Run from backend/:
 
-    uv run python tools/settings_defaults.py
+    uv run python tools/settings_defaults.py [--yaml <a deployment's appsetting.yaml>]
 
-A value config/appsetting.yaml sets must have no second copy in code, so each such field should be required. The
-script walks AppConfig's fields and the settings models they hold, and prints one line per field whose code default
-and YAML value both exist: `DIFFERS` or `same`, its dotted path, the code default and the YAML value, which is
-parsed with the field's type first. A settings model that the YAML sets is walked, not listed. A field whose class
-names what the site goes without while a file does not set it (`without` in its json_schema_extra) has no default to
-copy: its empty code value means unset, so it is not listed. It exits 1 when any field has both and 0 when none does.
+Every value lives in one place: a setting the file shows is required and has no code default, and a setting with a
+code default is not in the shipped file. The script walks AppConfig's fields and the settings models they hold, and
+prints one line per field that has both: its dotted path, the code default and the YAML value, which is parsed with
+the field's type first. A settings model that the YAML sets is walked, not listed. A field whose class names what the
+site goes without while a file does not set it (`without` in its json_schema_extra) has no default to copy: its empty
+code value means unset, so it is not listed. It exits 1 when any field has both and 0 when none does. On a
+deployment's file a line is a value that file sets over the code's default.
 """
 
 import argparse
@@ -34,12 +35,8 @@ class DuplicatedSetting:
     default: Any
     shipped: Any
 
-    @property
-    def differs(self) -> bool:
-        return self.default != self.shipped
-
     def __str__(self) -> str:
-        return f"{'DIFFERS' if self.differs else 'same':<8} {self.path}  code={self.default!r}  yaml={self.shipped!r}"
+        return f"{self.path}  code={self.default!r}  yaml={self.shipped!r}"
 
 
 def settings_model(annotation: Any) -> type[BaseModel] | None:
@@ -51,8 +48,8 @@ def duplicated_settings(model: type[BaseModel], values: Mapping[str, Any], prefi
         if name not in values:
             continue
         nested = settings_model(field.annotation)
-        if nested is not None and isinstance(values[name], Mapping):
-            yield from duplicated_settings(nested, values[name], f"{prefix}{name}.")
+        if nested is not None:
+            yield from duplicated_settings(nested, values[name] or {}, f"{prefix}{name}.")
             continue
         if field.is_required() or (isinstance(field.json_schema_extra, dict) and "without" in field.json_schema_extra):
             continue
@@ -68,8 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     duplicates = list(duplicated_settings(AppConfig, values))
     for duplicate in duplicates:
         print(duplicate)
-    differing = sum(duplicate.differs for duplicate in duplicates)
-    print(f"\n{len(duplicates)} fields have both a Python default and a YAML value; {differing} of them differ.")
+    print(f"\n{len(duplicates)} fields have both a Python default and a YAML value.")
     return 1 if duplicates else 0
 
 

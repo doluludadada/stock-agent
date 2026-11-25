@@ -8,6 +8,7 @@ import { paths } from '@/shared/config/paths'
 import { HISTORY_BARS, summarize } from '@/shared/lib/chart-range'
 import { DASH, useFormat } from '@/shared/lib/format'
 import { isStockId } from '@/shared/lib/stock-ids'
+import { useStrategyLabels } from '@/shared/lib/strategy-labels'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -42,15 +43,11 @@ type TechnicalQuery = ReturnType<typeof useStockTechnical>
 interface StockResearchPageProps {
   code: string
   actions?: (stock: { code: string; name: string }) => ReactNode
-  /** The strategy's name as the user sees it in the library. */
-  strategyName: (strategy: StrategyRef) => string
   /** Each rule of the strategy as a sentence in the reader's language, keyed by the rule name a report uses. */
   ruleSentences?: (strategy: StrategyRef) => ReadonlyMap<string, string>
-  /** A rule's name as the reader sees it, by the strategy that holds it; the report's name stays the key. */
-  ruleName: (strategy: StrategyRef, name: string) => string
 }
 
-export function StockResearchPage({ code, actions, strategyName, ruleSentences, ruleName }: StockResearchPageProps) {
+export function StockResearchPage({ code, actions, ruleSentences }: StockResearchPageProps) {
   const { t } = useTranslation('research')
   const listable = isStockId(code)
   const history = useStockHistory(code, HISTORY_BARS, listable)
@@ -72,7 +69,7 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences, 
   if (history.isPending) return <Skeleton className="h-[32rem] rounded-2xl" />
   if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} framed />
   if (history.data.bars.length === 0) return <WithoutBars history={history.data} actions={actions} />
-  return <Research history={history.data} actions={actions} strategyName={strategyName} ruleSentences={ruleSentences} ruleName={ruleName} />
+  return <Research history={history.data} actions={actions} ruleSentences={ruleSentences} />
 }
 
 /** A listed stock whose daily history holds no session yet, as while the history cache fills: one line says so. */
@@ -125,7 +122,7 @@ function StockHeader({ history, actions }: { history: StockHistory; actions: Sto
   )
 }
 
-function Research({ history, actions, strategyName, ruleSentences, ruleName }: Omit<StockResearchPageProps, 'code'> & { history: StockHistory }) {
+function Research({ history, actions, ruleSentences }: Omit<StockResearchPageProps, 'code'> & { history: StockHistory }) {
   const { t } = useTranslation('research')
   const technical = useStockTechnical(history.stock.stock_id)
   const overlays = useMemo(
@@ -172,7 +169,7 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
       <StockTables stockId={history.stock.stock_id} />
 
       <RequireSignIn reason={t('signIn')} className="rounded-2xl border bg-card">
-        <Evaluation technical={technical} strategyName={strategyName} ruleSentences={ruleSentences} ruleName={ruleName} />
+        <Evaluation technical={technical} ruleSentences={ruleSentences} />
       </RequireSignIn>
     </div>
   )
@@ -243,9 +240,10 @@ function YearPanel({ history }: { history: StockHistory }) {
  * The answer of the viewer's technical strategy for this stock, closed until asked for: the score with pass or
  * exclusion, every check in the reader's words, and each indicator it read at the last bar.
  */
-function Evaluation({ technical, strategyName, ruleSentences, ruleName }: { technical: TechnicalQuery } & Pick<StockResearchPageProps, 'strategyName' | 'ruleSentences' | 'ruleName'>) {
+function Evaluation({ technical, ruleSentences }: { technical: TechnicalQuery } & Pick<StockResearchPageProps, 'ruleSentences'>) {
   const { t } = useTranslation('research')
   const format = useFormat()
+  const labels = useStrategyLabels()
   const data = technical.data
   const sentences = useMemo(() => (data && ruleSentences?.(data.strategy)) ?? new Map<string, string>(), [ruleSentences, data])
   const lastBar = data?.bar_times.at(-1)
@@ -253,7 +251,7 @@ function Evaluation({ technical, strategyName, ruleSentences, ruleName }: { tech
     <Panel
       fold="always"
       title={t('evaluation.title')}
-      description={data && [strategyName(data.strategy), lastBar && t('evaluation.lastBar', { date: format.monthDay(lastBar) })].filter(Boolean).join(' · ')}
+      description={data && [labels.name({ id: data.strategy.strategy_id, name: data.strategy.name }), lastBar && t('evaluation.lastBar', { date: format.monthDay(lastBar) })].filter(Boolean).join(' · ')}
     >
       {technical.isPending ? (
         <Skeleton className="h-44 rounded-lg" />
@@ -262,7 +260,7 @@ function Evaluation({ technical, strategyName, ruleSentences, ruleName }: { tech
       ) : technical.data.report === null ? (
         <p className="text-sm text-muted-foreground">{t('evaluation.none')}</p>
       ) : (
-        <EvaluationReport technical={technical.data} report={technical.data.report} sentences={sentences} ruleName={(rule) => ruleName(technical.data.strategy, rule)} />
+        <EvaluationReport technical={technical.data} report={technical.data.report} sentences={sentences} />
       )}
     </Panel>
   )
@@ -272,11 +270,12 @@ interface EvaluationReportProps {
   technical: StockTechnical
   report: NonNullable<StockTechnical['report']>
   sentences: ReadonlyMap<string, string>
-  ruleName: (name: string) => string
 }
 
-function EvaluationReport({ technical, report, sentences, ruleName }: EvaluationReportProps) {
+function EvaluationReport({ technical, report, sentences }: EvaluationReportProps) {
   const { t } = useTranslation('research')
+  const labels = useStrategyLabels()
+  const ruleName = (rule: string) => labels.rule(technical.strategy.strategy_id, rule)
   const passed = report.hard_failures.length === 0
   const checks = reportChecks(report)
   return (

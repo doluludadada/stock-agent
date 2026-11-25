@@ -1,4 +1,3 @@
-from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -53,28 +52,6 @@ def part(status: OrderStatus, ordered: int = 1000, dealt: int = 0, reported: int
         fill_price=100.0 if dealt else None,
         description=f"{status} {ordered}",
     )
-
-
-@pytest.mark.parametrize(
-    ("order_type", "limit_price", "time_in_force", "refusal"),
-    [
-        (OrderType.LIMIT, 100, TimeInForce.IOC, None),
-        (OrderType.LIMIT, 100, TimeInForce.FOK, None),
-        (
-            OrderType.LIMIT,
-            100,
-            TimeInForce.ROD,
-            (RejectReason.UNSUPPORTED_TIME_IN_FORCE, "ROD would leave a working order at the broker that the app does not track"),
-        ),
-        (OrderType.MARKET, None, TimeInForce.IOC, (RejectReason.UNSUPPORTED_ORDER_TYPE, "the app sends LIMIT orders only")),
-    ],
-)
-def test_a_broker_takes_only_limit_orders_that_leave_nothing_working(
-    order_type: OrderType, limit_price: float | None, time_in_force: TimeInForce, refusal: tuple[RejectReason, str] | None
-) -> None:
-    placing = replace(new_order(), order_type=order_type, limit_price=limit_price, time_in_force=time_in_force)
-
-    assert ACCEPTANCE.apply(placing, Account(cash=1_000_000)) == refusal
 
 
 @pytest.mark.parametrize(

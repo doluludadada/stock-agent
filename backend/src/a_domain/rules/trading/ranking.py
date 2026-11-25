@@ -16,10 +16,10 @@ from a_domain.model.trading.ranking_formula import (
     RevenueAcceleration,
     RevenueYoy,
 )
-from a_domain.rules.technical.matrix import DailyBarMatrix, DailyBarMatrixRule, Flags, Floats, last_closes
+from a_domain.rules.technical.matrix import DailyBarMatrix, DailyBarMatrixRule, last_closes
 from a_domain.types.enums import SecurityKind
 from a_domain.types.errors import RankingUnavailable
-from a_domain.types.values import Fraction, NonEmptyText, ProperFraction, month_index, month_start
+from a_domain.types.values import Flags, Floats, Fraction, NonEmptyText, ProperFraction, month_index, month_start
 
 type DayOfMonth = Annotated[int, Field(ge=1, le=28)]
 
@@ -165,6 +165,18 @@ class DecisionSessionsRule:
             decisions[(session.year, session.month)] = (column, month_start(month))
 
         return list(decisions.values())
+
+
+def latest_decision(decision_rule: DecisionSessionsRule, sessions: Sequence[date]) -> tuple[int, date]:
+    """The latest decision session among `sessions`, as its column, and the month of revenue it reads. RankingUnavailable if none."""
+    decisions = decision_rule.apply(sessions)
+
+    if not decisions:
+        raise RankingUnavailable(
+            f"No ranking can be made yet: the daily history holds {sessions[0]} to {sessions[-1]}, and no decision session."
+        )
+
+    return decisions[-1]
 
 
 @dataclass(frozen=True, kw_only=True)

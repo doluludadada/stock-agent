@@ -1,7 +1,7 @@
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -28,7 +28,7 @@ class MarketDataCollector:
 
     def __init__(
         self,
-        ohlcv_provider: IOhlcvProvider,
+        ohlcv_provider: IPriceHistoryProvider,
         stock_provider: IStockProvider,
         archive: IDailyCloseArchive | None,
         market_clock: IMarketClock,

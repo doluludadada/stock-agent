@@ -39,7 +39,7 @@ class OrderSettlement:
 
     def __init__(
         self,
-        brokerage: IBrokerExecutionProvider[Any, Any] | None,
+        brokerage: IBrokerExecutionProvider[Any] | None,
         journal: ITradingJournal,
         locks: Mapping[ExecutionProvider, asyncio.Lock],
         market_clock: IMarketClock,

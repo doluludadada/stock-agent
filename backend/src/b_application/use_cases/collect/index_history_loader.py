@@ -1,5 +1,5 @@
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketIndex
 from b_application.config.app_config import AppConfig
@@ -11,7 +11,7 @@ class IndexHistoryLoader:
     history cache the stock pages share. It fetches no realtime quote.
     """
 
-    def __init__(self, ohlcv_provider: IOhlcvProvider, market_clock: IMarketClock, config: AppConfig) -> None:
+    def __init__(self, ohlcv_provider: IPriceHistoryProvider, market_clock: IMarketClock, config: AppConfig) -> None:
         self._ohlcv_provider = ohlcv_provider
         self._market_clock = market_clock
         self._history_days = config.analysis.history_days

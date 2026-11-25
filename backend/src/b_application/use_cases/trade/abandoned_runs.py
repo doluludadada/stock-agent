@@ -25,7 +25,7 @@ class AbandonedRuns:
 
     def __init__(
         self,
-        brokerage: IBrokerExecutionProvider[Any, Any] | None,
+        brokerage: IBrokerExecutionProvider[Any] | None,
         journal: ITradingJournal,
         market_clock: IMarketClock,
         process_started: datetime,

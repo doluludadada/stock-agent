@@ -113,12 +113,9 @@ class RankingConfig(BaseModel):
     """
     The monthly stock ranking, the formulas it can be made by, and its backtest. Every value comes from the `ranking`
     section of config/appsetting.yaml; the fees and the tax are the market's, the revenue deadline MOPS's.
-    `retired` names the settings this section once had and no longer reads.
     """
 
-    model_config = ConfigDict(
-        use_attribute_docstrings=True, json_schema_extra={"retired": ["timestamp_calendars", "timestamp_timeout_seconds"]}
-    )
+    model_config = ConfigDict(use_attribute_docstrings=True)
 
     decision_day: int = Field(ge=1, le=28)
     """Each month decides at the close of its first session on this day of the month or later."""
@@ -138,9 +135,7 @@ class RankingConfig(BaseModel):
     entries the settings file sets at that path.
     """
 
-    top_up_tolerance_pct: float = Field(
-        default=0.10, ge=0, le=1, json_schema_extra={"steps": [0.05, 0.1, 0.2], "unit": SettingUnit.PERCENT}
-    )
+    top_up_tolerance_pct: float = Field(ge=0, le=1, json_schema_extra={"steps": [0.05, 0.1, 0.2], "unit": SettingUnit.PERCENT})
     """
     How far below its equal weight a ranked stock the account holds may be worth, as a share of that weight, before a
     follow after a switch of active_formula buys it up to the weight (TopUpRule). A follow sizes each BUY at its limit,
@@ -291,14 +286,13 @@ class TradingConfig(BaseModel):
     How far an order's limit may lie past the price its decision saw, on every broker, and the limits of every BUY on a
     real broker (ExecutionProvider.real), which follow the account's equity as each run values it. Which broker a run
     orders on is the run's own choice when it starts, the mock account by default. Every value comes from the `trading`
-    section of config/appsetting.yaml; a file without one runs on the defaults. `retired` names the fixed NT$ limits the
-    section once had, which these multiples replaced.
+    section of config/appsetting.yaml.
     """
 
-    model_config = ConfigDict(use_attribute_docstrings=True, json_schema_extra={"retired": ["max_order_value", "max_daily_buy_value"]})
+    model_config = ConfigDict(use_attribute_docstrings=True)
 
     limit_offset_pct: float = Field(
-        default=0.02, ge=0, le=0.05, json_schema_extra={"steps": [0, 0.005, 0.01, 0.02, 0.03, 0.05], "unit": SettingUnit.PERCENT}
+        ge=0, le=0.05, json_schema_extra={"steps": [0, 0.005, 0.01, 0.02, 0.03, 0.05], "unit": SettingUnit.PERCENT}
     )
     """
     How far an order's limit price may lie past the price its decision saw: a BUY's at most this share above it and a
@@ -309,7 +303,7 @@ class TradingConfig(BaseModel):
     """
 
     max_order_equity_pct: float = Field(
-        default=0.25, gt=0, le=1, json_schema_extra={"steps": [0.1, 0.15, 0.2, 0.25, 0.3, 0.5], "unit": SettingUnit.PERCENT}
+        gt=0, le=1, json_schema_extra={"steps": [0.1, 0.15, 0.2, 0.25, 0.3, 0.5], "unit": SettingUnit.PERCENT}
     )
     """
     Most one BUY on a real broker may cost at its limit price, fees aside, as a share of the account's equity as the run
@@ -319,7 +313,7 @@ class TradingConfig(BaseModel):
     """
 
     max_daily_buy_equity_pct: float = Field(
-        default=1.1, gt=0, le=3, json_schema_extra={"steps": [0.5, 1, 1.1, 1.5, 2], "unit": SettingUnit.PERCENT}
+        gt=0, le=3, json_schema_extra={"steps": [0.5, 1, 1.1, 1.5, 2], "unit": SettingUnit.PERCENT}
     )
     """
     Most the BUYs on a real broker of one Taiwan calendar day may cost together at their limit prices, fees aside, as a
@@ -353,7 +347,7 @@ class MockTradingConfig(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True)
 
     initial_cash: float = Field(
-        default=1_000_000, gt=0, json_schema_extra={"steps": [100000, 500000, 1000000, 3000000, 10000000], "unit": SettingUnit.TWD}
+        gt=0, json_schema_extra={"steps": [100000, 500000, 1000000, 3000000, 10000000], "unit": SettingUnit.TWD}
     )
     max_fill_quantity: int | None = Field(default=None, gt=0, json_schema_extra={"steps": [1000, 5000, 10000, 50000]})
     """Most shares the simulated market fills per order at the limit price. Unset fills any quantity."""
@@ -417,7 +411,7 @@ class ShioajiConfig(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return init_settings, CredentialsOnly(env_settings), CredentialsOnly(dotenv_settings)
 
-    server: ShioajiServer = ShioajiServer.SIMULATION
+    server: ShioajiServer
     """
     The SinoPac server the login is made on. The SinoPac page switches it, behind the administrator's password, as
     ServerSwitchRule allows.
@@ -481,10 +475,7 @@ class ShioajiConfig(BaseSettings):
     """
 
     simulation_initial_cash: float = Field(
-        default=1_000_000,
-        gt=0,
-        allow_inf_nan=False,
-        json_schema_extra={"steps": [100000, 500000, 1000000, 3000000, 10000000], "unit": SettingUnit.TWD},
+        gt=0, allow_inf_nan=False, json_schema_extra={"steps": [100000, 500000, 1000000, 3000000, 10000000], "unit": SettingUnit.TWD}
     )
     """The cash SinoPac's simulation account started with, which that server does not report (SimulationCashRule)."""
 

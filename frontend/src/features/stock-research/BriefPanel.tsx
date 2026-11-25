@@ -1,6 +1,6 @@
 import { ArrowDown, Check, Circle, CircleSlash, ExternalLink, LoaderCircle, PenLine, Sparkles } from 'lucide-react'
 import { useId } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
 import { useAllows, useSession } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
@@ -93,17 +93,14 @@ function Steps({ steps }: { steps: readonly BriefStep[] }) {
 function Ask({ ask, label, onWrite }: { ask: BriefAsk; label: string; onWrite: () => void }) {
   const { t } = useTranslation('research')
   const links = useAuthLinks()
-  const location = useLocation()
   if (ask === 'none') return null
   if (ask === 'signIn') {
     return (
       <p className="text-center text-sm text-pretty text-muted-foreground">
         {t('brief.signIn')}{' '}
-        {links && (
-          <Link to={links.signIn(`${location.pathname}${location.search}`)} className="tap font-medium text-brand underline-offset-4 hover:underline">
-            {t('common:auth.signIn')}
-          </Link>
-        )}
+        <Link to={links.signIn} className="tap font-medium text-brand underline-offset-4 hover:underline">
+          {t('common:auth.signIn')}
+        </Link>
       </p>
     )
   }

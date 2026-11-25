@@ -194,6 +194,34 @@ const common: DictionaryShape<typeof en> = {
     title: '這個頁面發生問題',
     description: '回到首頁再試一次。',
   },
+  settingsSave: {
+    password: {
+      title: '儲存設定？',
+      description: '輸入你的密碼確認，伺服器會立即改用新設定。',
+      label: '你的密碼',
+      wrong: '密碼不正確，沒有儲存任何內容。',
+      throttledMinutes: '密碼錯誤太多次，請在 {{minutes}} 分 {{seconds}} 秒後再試。',
+      throttledSeconds: '密碼錯誤太多次，請在 {{seconds}} 秒後再試。',
+      failed: '沒有儲存成功：{{reason}}',
+      confirm: '儲存並套用',
+      saving: '儲存中…',
+      cancel: '取消',
+      show: '顯示密碼',
+      hide: '隱藏密碼',
+    },
+    google: {
+      title: '儲存設定？',
+      description: '你的帳號沒有密碼，因此要重新登入 Google 來確認。回到這裡後會立即送出儲存，伺服器隨即改用新設定。',
+      confirm: '用 Google 確認',
+      cancel: '取消',
+    },
+    reason: {
+      administratorsOnly: '這個帳號已不是管理員。',
+      passwordRequired: '這個操作需要你的密碼。',
+      fileRefused: '伺服器不讀寫這個設定檔：它是符號連結、不在設定資料夾內，或檔案太大。',
+      fileMissing: '伺服器上沒有這個設定檔。',
+    },
+  },
 }
 
 export default common

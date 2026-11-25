@@ -24,7 +24,7 @@ def formulas_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *formulas:
         {**asdict(formula), "factors": [{**asdict(factor), "kind": factor.kind.value} for factor in formula.factors]}
         for formula in formulas
     ]
-    start, end = shipped.index("  formulas:\n"), shipped.index("  # The ranking page compares")
+    start, end = shipped.index("  formulas:\n"), shipped.index("  # The revenue trend of the stock page")
     listed = "".join(f"  {line}\n" for line in yaml.safe_dump({"formulas": plain}, sort_keys=False).splitlines())
     active = re.sub(r"(?m)^  active_formula: .*$", f"  active_formula: {formulas[0].name}", shipped[:start], count=1)
     settings.write_text(active + listed + shipped[end:], encoding="utf-8")

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { strategyFromApi, type ApiStrategy } from '../api/mapping'
-import type { BuiltInId } from './settings'
+import type { BuiltInId } from '@/shared/lib/strategy-labels'
 import type { IdFactory, Strategy } from './types'
 
 export function sequentialIds(): IdFactory {
@@ -14,7 +14,7 @@ export const fakeText = {
   number: (value: number) => String(value),
 }
 
-export { BUILT_IN_IDS } from './settings'
+export { BUILT_IN_IDS } from '@/shared/lib/strategy-labels'
 
 const folder = path.resolve(import.meta.dirname, '../../../../../config/strategies')
 

@@ -5,6 +5,7 @@ brief of each of the monthly ranking's top stocks, on the site's own AI budget, 
 
 import asyncio
 import json
+from collections import defaultdict
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
@@ -24,7 +25,7 @@ from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.system_writing_log import SqlSystemWritingLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.dependencies import compose_runtime
-from d_presentation.live_runtime import BriefTurns, write_for_system_stocks
+from d_presentation.live_runtime import write_for_system_stocks
 
 pytestmark = pytest.mark.asyncio
 
@@ -77,7 +78,7 @@ def writer(harness: CliHarness) -> Pipeline:
 
 
 async def step(harness: CliHarness) -> None:
-    await write_for_system_stocks(harness.runtime.system_writer, BriefTurns(), harness.logger)
+    await write_for_system_stocks(harness.runtime.system_writer, defaultdict(asyncio.Lock), harness.logger)
 
 
 def next_session(harness: CliHarness, day: date) -> None:
@@ -255,9 +256,9 @@ async def test_a_viewer_who_spent_the_days_stocks_does_not_stop_the_sites_own_wr
 
 async def test_the_timer_waits_for_a_stocks_turn_while_a_viewers_request_holds_it() -> None:
     harness, ai = writing_site()
-    turns = BriefTurns()
+    turns = defaultdict(asyncio.Lock)
 
-    async with turns.of("2330"):
+    async with turns["2330"]:
         timer = asyncio.get_running_loop().create_task(write_for_system_stocks(harness.runtime.system_writer, turns, harness.logger))
         await asyncio.sleep(0.05)
         assert ai.asked == []

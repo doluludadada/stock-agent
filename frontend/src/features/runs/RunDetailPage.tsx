@@ -7,6 +7,7 @@ import { usePageTitle } from '@/shared/lib/page-title'
 import { paths } from '@/shared/config/paths'
 import { isApiError, useAllows, useRunOrders, useShows, type Order } from '@/shared/api'
 import { DASH, useFormat } from '@/shared/lib/format'
+import { useStrategyLabels } from '@/shared/lib/strategy-labels'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { StockLink } from '@/shared/ui/stock-name'
 import { Badge } from '@/shared/ui/badge'
@@ -28,8 +29,6 @@ import { RunStateBadge } from './RunStateBadge'
 interface RunDetailPageProps {
   runId: string
   renderWatch?: (code: string, label: string) => ReactNode
-  /** A rule's name in the reader's language; the report's name stays the key. */
-  ruleName: (name: string) => string
 }
 
 export function RunDetailPage(props: RunDetailPageProps) {
@@ -41,7 +40,7 @@ export function RunDetailPage(props: RunDetailPageProps) {
   )
 }
 
-function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
+function RunDetail({ runId, renderWatch }: RunDetailPageProps) {
   const { t } = useTranslation('runs')
   const run = useRun(runId)
   const ended = run.data !== undefined && run.data.state !== 'running'
@@ -92,7 +91,7 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
       )}
       {run.data.summary && <Summary summary={run.data.summary} />}
       {followable && <FollowPanel runId={runId} follow={follow} decisions={signals.data} names={names} />}
-      {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} buyFrom={buyable ? runId : null} renderWatch={renderWatch} ruleName={ruleName} />}
+      {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} strategyId={run.data.summary?.technical_strategy_id} buyFrom={buyable ? runId : null} renderWatch={renderWatch} />}
       {ended && (
         <div className="card-grid xl:grid-cols-2">
           <Signals query={signals} marks={marks} />
@@ -163,16 +162,19 @@ function Summary({ summary }: { summary: NonNullable<Run['summary']> }) {
   )
 }
 
-interface ReportsProps extends Pick<RunDetailPageProps, 'renderWatch' | 'ruleName'> {
+interface ReportsProps extends Pick<RunDetailPageProps, 'renderWatch'> {
   reports: NonNullable<Run['reports']>
+  /** The strategy the run evaluated with, which decides whether its rules read in the reader's language. */
+  strategyId: string | null | undefined
   /** The run whose reported stocks each offer a BUY; null where the run offers none. */
   buyFrom: string | null
 }
 
 /** One card per stock: its scores, the price the run read, the rules that excluded it and the AI's summary. */
-function Reports({ reports, buyFrom, renderWatch, ruleName }: ReportsProps) {
+function Reports({ reports, strategyId, buyFrom, renderWatch }: ReportsProps) {
   const { t } = useTranslation('runs')
   const format = useFormat()
+  const labels = useStrategyLabels()
   return (
     <Panel title={t('reportsTitle')}>
       <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-3">
@@ -200,7 +202,7 @@ function Reports({ reports, buyFrom, renderWatch, ruleName }: ReportsProps) {
                 <ul className="flex flex-wrap gap-1.5">
                   {report.technical_report.hard_failures.map((rule) => (
                     <li key={rule} className="rounded-md border border-destructive/25 bg-danger-soft px-2 py-0.5 text-xs">
-                      {ruleName(rule)}
+                      {labels.rule(strategyId, rule)}
                     </li>
                   ))}
                 </ul>

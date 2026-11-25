@@ -220,7 +220,9 @@ async def test_a_login_shioaji_reports_down_answers_no_realtime_quote_until_a_re
         after_down = first.realtime_quotes
         del dead
 
-        async with open_runtime(config, shared, replaced=first.shioaji_client) as second:
+        assert first.shioaji is not None
+
+        async with open_runtime(config, shared, replaced=first.shioaji.client) as second:
             gc.collect()
             clients = [fake for ref in made if (fake := ref()) is not None]
             clients[0].session_down()
@@ -357,7 +359,7 @@ async def test_a_refused_switch_logs_nothing_out_and_a_later_runtime_on_its_serv
             refused = await switch.reload()
 
         with switch.hold() as current:
-            still = current.runtime.shioaji is not None and current.runtime.shioaji.up
+            still = current.runtime.shioaji is not None and current.runtime.shioaji.connection.up
 
         after_the_refusal = [(client.simulation, len(client.logins), client.logouts) for client in clients]
         edit(project, "temperature: 0.7", "temperature: 0.2")

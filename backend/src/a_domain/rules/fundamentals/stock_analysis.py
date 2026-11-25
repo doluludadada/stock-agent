@@ -1,6 +1,6 @@
 import math
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from datetime import date
 from statistics import median
 
 from pydantic import FiniteFloat, NonNegativeInt, PositiveInt
@@ -170,9 +170,6 @@ class EarningsTrend:
     quarter has no such change.
     """
 
-    filed_eps_fetched_at: datetime | None
-    """When the newest MOPS page that gave a quarter's EPS was fetched. None when every EPS is the open-data archive's."""
-
 
 def quarter_result(quarter: FiscalQuarter, held: QuarterFinancials | None, eps: Mapping[FiscalQuarter, float]) -> QuarterResult:
     year_to_date = eps.get(quarter)
@@ -203,15 +200,11 @@ class EarningsTrendRule:
     def apply(self, stock_id: str, quarters: Sequence[QuarterFinancials], pages: Sequence[QuarterEps]) -> EarningsTrend:
         held = {quarter.quarter: quarter for quarter in quarters}
         archived = {quarter.quarter: quarter.eps for quarter in quarters if quarter.eps is not None}
-        filed = {page.quarter: page for page in pages if stock_id in page.cumulative_eps and page.quarter not in archived}
-        eps = archived | {quarter: page.cumulative_eps[stock_id] for quarter, page in filed.items()}
+        filed = {page.quarter: page.cumulative_eps[stock_id] for page in pages if stock_id in page.cumulative_eps}
+        eps = filed | archived
         results = [quarter_result(quarter, held.get(quarter), eps) for quarter in sorted(held.keys() | eps.keys())]
 
-        return EarningsTrend(
-            quarters=results,
-            eps_growing_quarters=run_length([result.eps_year_over_year for result in results], 0.0),
-            filed_eps_fetched_at=max((page.fetched_at for page in filed.values()), default=None),
-        )
+        return EarningsTrend(quarters=results, eps_growing_quarters=run_length([result.eps_year_over_year for result in results], 0.0))
 
 
 @dataclass(frozen=True)

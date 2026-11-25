@@ -82,7 +82,7 @@ describe('registration', { timeout: 20_000 }, () => {
       }),
     )
     const user = userEvent.setup({ delay: null })
-    renderScreen(<RegisterScreen signInHref="/sign-in" onDone={vi.fn()} />)
+    renderScreen(<RegisterScreen onDone={vi.fn()} />)
 
     await screen.findByRole('heading', { name: 'Create an account' })
     await fillAccount(user, { username: TEST_USER.username, email: TEST_USER.email, password: 'watchlist mei 88' })
@@ -110,7 +110,7 @@ describe('registration', { timeout: 20_000 }, () => {
     )
     const done = vi.fn()
     const user = userEvent.setup({ delay: null })
-    renderScreen(<RegisterScreen signInHref="/sign-in" onDone={done} />)
+    renderScreen(<RegisterScreen onDone={done} />)
 
     await screen.findByRole('heading', { name: 'Create an account' })
     await fillAccount(user, { username: TEST_USER.username, email: TEST_USER.email, password: 'watchlist mei 88' })
@@ -142,7 +142,7 @@ describe('registration', { timeout: 20_000 }, () => {
     )
     const done = vi.fn()
     const user = userEvent.setup({ delay: null })
-    renderScreen(<RegisterScreen signInHref="/sign-in" onDone={done} />)
+    renderScreen(<RegisterScreen onDone={done} />)
 
     await screen.findByRole('heading', { name: 'Create an account' })
     await fillAccount(user, { username: 'mei', email: TEST_USER.email, password: 'watchlist mei 88' })

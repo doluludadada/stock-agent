@@ -4,7 +4,7 @@ from datetime import date, datetime
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.fundamentals.eps import Eps, EpsUnavailable
-from a_domain.types.enums import EpsBasis, EpsKind, EpsUnavailableReason, InformationSource
+from a_domain.types.enums import EpsKind, EpsUnavailableReason, InformationSource
 from a_domain.types.values import FiscalQuarter
 
 
@@ -63,7 +63,6 @@ def trailing_eps(stock_id: str, filing: QuarterEps, filings: EpsFilings, newer: 
         value=round(value, 2),
         kind=EpsKind.TRAILING_TWELVE_MONTHS,
         period_end=filing.quarter,
-        basis=EpsBasis.ACTUAL,
         source=InformationSource.TWSE_MOPS,
         fetched_at=filing.fetched_at,
         newer_quarters=newer,

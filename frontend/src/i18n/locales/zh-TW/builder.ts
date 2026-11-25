@@ -84,10 +84,10 @@ const builder: DictionaryShape<typeof en> = {
   },
   scoring: {
     summary: '評分：基準分 {{base}}',
-    baseScore: '基準分',
-    blockFailurePenalty: '淘汰扣分',
-    failureScoreReduction: '未通過扣分',
-    passScoreIncrease: '通過加分',
+    base_score: '基準分',
+    block_failure_penalty: '淘汰扣分',
+    failure_score_reduction: '未通過扣分',
+    pass_score_increase: '通過加分',
     note: '通過「未通過淘汰」規則本身不會加分。',
   },
   name: {

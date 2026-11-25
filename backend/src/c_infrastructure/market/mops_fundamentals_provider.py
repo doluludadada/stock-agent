@@ -1,7 +1,7 @@
 import asyncio
 import csv
 import io
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import override
@@ -11,24 +11,25 @@ from bs4 import BeautifulSoup
 
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
-from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.fundamentals.filing import FilingDeadlineRule, FinalFilingsRule
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.types.enums import MarketType
 from a_domain.types.values import FiscalQuarter
-from b_application.config.sources_config import MopsSources
+from b_application.config.sources_config import MonthlyRevenueFeed, MopsSources
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.quarter_eps_dto import QuarterEpsDTO
 from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_number
+from c_infrastructure.market.twse_provider import parse_monthly_revenue
 from c_infrastructure.request_pace import HostPace
 
 
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
     Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in the database, and the
-    monthly revenue summary of a past month (one CSV per market and month), read with the exchange listing's parser.
+    monthly revenue summary of a past month (one CSV per market and month), read like the exchanges' summary of the latest
+    month under its field names (`monthly_revenue`).
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
     deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`. Each request
@@ -40,13 +41,13 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         db: DatabaseConnector,
         market_clock: IMarketClock,
         mops: MopsSources,
-        listing: ITaiwanStockProvider,
+        monthly_revenue: Mapping[MarketType, MonthlyRevenueFeed],
         logger: ILoggingProvider,
         write_lock: asyncio.Lock,
         pace: HostPace,
     ) -> None:
         self._db = db
-        self._listing = listing
+        self._monthly_revenue = monthly_revenue
         # One page save at a time per process, every runtime's: two runs merging the same quarter at once would both insert it.
         self._write_lock = write_lock
         self._mops = mops
@@ -127,7 +128,8 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
             return None
 
         rows = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig", errors="replace")))
-        revenues = [revenue for row in rows if (revenue := self._listing.parse_monthly_revenue(row, market)) is not None]
+        feed = self._monthly_revenue[market]
+        revenues = [revenue for row in rows if (revenue := parse_monthly_revenue(row, market, feed)) is not None]
         served = [revenue for revenue in revenues if (revenue.year, revenue.month) == (year, month)]
 
         if not served:

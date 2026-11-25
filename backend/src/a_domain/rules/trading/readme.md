@@ -34,13 +34,12 @@ Each rule makes one decision in `apply`:
 |                 | `AffordableQuantityRule`  | The largest lot-aligned BUY quantity the cash pays for, fee included                       |
 | `tick.py`       | `TickSizeRule`            | The exchange tick of a price                                                               |
 |                 | `LimitPriceRule`          | An order's limit price: at most trading.limit_offset_pct past the decided price, on the grid |
-| `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: continuous trading, quote age                            |
-|                 | `RealBrokerOrdererRule`   | Why a user may not order on a real broker: the site's ordering switch as it is at the send, then the user |
+| `order_rule.py` | `RealBrokerOrdererRule`   | Why a user may not order on a real broker: the site's ordering switch as it is at the send, then the user |
 |                 | `BrokerLoginRule`         | Why a real broker's login may not take an order now: down, or on another server than shioaji.server names on disk at the ask |
 |                 | `BrokerAccessRule`        | Why an order may not reach its broker now: the run's choice, a real broker's orderer, login, limits |
 |                 | `BuyLimitRule`            | Why a real broker's BUY may not be sent: its value and the day's BUYs above the limits     |
-|                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |
-| `execution.py`  | `OrderAcceptanceRule`     | Why any broker refuses an order unsent: not LIMIT, ROD, or more than the account covers    |
+|                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED off continuous trading or on a stale quote |
+| `execution.py`  | `OrderAcceptanceRule`     | Why any broker refuses an order unsent: more cash or shares than the account holds         |
 |                 | `LotSplitRule`            | An order's shares as the exchange trades them: one board-lot part and one odd-lot part     |
 |                 | `FillRule`                | What one fill settles: its fee and tax, and a SELL's realized PnL                          |
 |                 | `BrokerOutcomeRule`       | The final status of a real broker's order once every lot part it sent has reported         |

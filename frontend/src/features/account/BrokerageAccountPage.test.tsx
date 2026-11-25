@@ -1,5 +1,5 @@
 import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
@@ -9,9 +9,9 @@ import { siteShowing } from '@/test/features'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
 import type { BrokerageAccount, BrokerageStatement } from './api'
 import { BrokerageAccountPage } from './BrokerageAccountPage'
-import type { SaveConfirmationProps } from '@/shared/api'
 
 const HOLDER: User = { ...TEST_ADMIN, permissions: [...TEST_ADMIN.permissions, 'use_real_broker'] }
+const PASSWORD = 'correct horse battery'
 
 const STATEMENT: BrokerageStatement = {
   read_at: '2026-11-13T06:00:00Z',
@@ -45,13 +45,18 @@ const NOT_ANSWERING = { detail: 'Shioaji answered TimeoutError', code: 'broker_n
 const LISTING: Record<string, string> = { '2330': '台積電', '2317': '鴻海' }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-function serve(account: () => Response) {
+/** The page's reads, and the settings save, whose bodies land in `saves`. */
+function serve(account: () => Response, saves: unknown[] = []) {
   const asked: string[] = []
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
       asked.push(url)
       const { pathname, searchParams } = new URL(url, 'http://localhost')
+      if (pathname === '/v1/admin/settings' && init?.method === 'PUT') {
+        saves.push(JSON.parse(String(init.body)))
+        return json([])
+      }
       if (pathname === '/v1/auth/status') return json(siteShowing())
       if (pathname === '/v1/account/brokerage') return account()
       if (pathname === '/v1/account/trades') return json([])
@@ -65,40 +70,13 @@ function serve(account: () => Response) {
   return asked
 }
 
-/**
- * The settings save's confirmation as far as this page sees it: the dialog says the page's words and what it holds, and
- * its confirm, held until the page's own field is filled, saves `changes` here. The settings feature's own dialog and
- * save are tested on their page and in app/brokerage.test.tsx.
- */
-function recordingConfirmation(saved: SaveConfirmationProps['changes'][]) {
-  return function Confirmation({ open, changes, onSaved, title, description, children, ready = true }: SaveConfirmationProps) {
-    if (!open) return null
-    return (
-      <dialog open aria-label={title}>
-        <p>{description}</p>
-        {children}
-        <button
-          type="button"
-          disabled={!ready}
-          onClick={() => {
-            saved.push(changes)
-            onSaved()
-          }}
-        >
-          Confirm
-        </button>
-      </dialog>
-    )
-  }
-}
-
-function open(user: User = HOLDER, saved: SaveConfirmationProps['changes'][] = []) {
+function open(user: User = HOLDER) {
   session.signIn(user)
   render(
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <BrokerageAccountPage Confirmation={recordingConfirmation(saved)} />
+          <BrokerageAccountPage />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -106,6 +84,14 @@ function open(user: User = HOLDER, saved: SaveConfirmationProps['changes'][] = [
 }
 
 const ORDERING_OFF = 'Ordering off'
+
+/** Confirms the open save with the administrator's password, as the settings save asks. */
+async function confirmWithPassword(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+  await user.type(within(dialog).getByLabelText('Your password'), PASSWORD)
+  await user.click(within(dialog).getByRole('button', { name: 'Save and apply' }))
+}
+
+const sent = (changes: unknown[]) => ({ confirm: true, changes, password: PASSWORD })
 
 describe('the SinoPac account', () => {
   afterEach(() => {
@@ -227,17 +213,18 @@ describe('the SinoPac account', () => {
 
   it('switches to Production only once the server’s name is typed, sending the server and ordering off in one save', async () => {
     const user = userEvent.setup({ delay: null })
-    const saved: SaveConfirmationProps['changes'][] = []
-    serve(() => json(SIMULATION))
-    open(HOLDER, saved)
+    const saves: unknown[] = []
+    serve(() => json(SIMULATION), saves)
+    open()
 
     await user.click(await screen.findByRole('button', { name: 'Switch to Production…' }))
-    const dialog = screen.getByRole('dialog', { name: 'Switch to Production?' })
+    const dialog = await screen.findByRole('dialog', { name: 'Switch to Production?' })
     expect(within(dialog).getByText('Every order on SinoPac from now on is real money.')).toBeVisible()
     expect(within(dialog).getByText('Ordering on SinoPac turns off. Turn it on again here to order.')).toBeVisible()
     expect(within(dialog).getByText('The SinoPac login restarts on the new server, and the quotes come from it too.')).toBeVisible()
     expect(within(dialog).getByText('A ranking follow, by hand or by schedule, never orders on Production.')).toBeVisible()
-    const confirm = within(dialog).getByRole('button', { name: 'Confirm' })
+    await user.type(within(dialog).getByLabelText('Your password'), PASSWORD)
+    const confirm = within(dialog).getByRole('button', { name: 'Save and apply' })
     expect(confirm, 'held until the name is typed').toBeDisabled()
 
     await user.type(within(dialog).getByLabelText('Type Production to confirm'), 'Productio')
@@ -245,13 +232,13 @@ describe('the SinoPac account', () => {
     await user.type(within(dialog).getByLabelText('Type Production to confirm'), 'n')
     await user.click(confirm)
 
-    expect(saved).toEqual([
-      [
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(saves).toEqual([
+      sent([
         { path: 'shioaji.server', value: 'production' },
         { path: 'features.sinopac_ordering', value: 'off' },
-      ],
+      ]),
     ])
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('keeps the switch to Production off and names the variables the server lacks, never asking for a value', async () => {
@@ -287,50 +274,53 @@ describe('the SinoPac account', () => {
 
   it('switches back to Simulation without a typed name, turning ordering off too', async () => {
     const user = userEvent.setup({ delay: null })
-    const saved: SaveConfirmationProps['changes'][] = []
-    serve(() => json({ ...PRODUCTION, ordering: true }))
-    open(HOLDER, saved)
+    const saves: unknown[] = []
+    serve(() => json({ ...PRODUCTION, ordering: true }), saves)
+    open()
 
     await user.click(await screen.findByRole('button', { name: 'Switch to Simulation…' }))
-    await user.click(within(screen.getByRole('dialog', { name: 'Switch to Simulation?' })).getByRole('button', { name: 'Confirm' }))
+    await confirmWithPassword(user, await screen.findByRole('dialog', { name: 'Switch to Simulation?' }))
 
-    expect(saved).toEqual([
-      [
-        { path: 'shioaji.server', value: 'simulation' },
-        { path: 'features.sinopac_ordering', value: 'off' },
-      ],
-    ])
+    await waitFor(() =>
+      expect(saves).toEqual([
+        sent([
+          { path: 'shioaji.server', value: 'simulation' },
+          { path: 'features.sinopac_ordering', value: 'off' },
+        ]),
+      ]),
+    )
   })
 
   it('turns ordering on for administrators and off again, saying on Production that it is real money', async () => {
     const user = userEvent.setup({ delay: null })
-    const saved: SaveConfirmationProps['changes'][] = []
-    serve(() => json(PRODUCTION))
-    open(HOLDER, saved)
+    const saves: unknown[] = []
+    serve(() => json(PRODUCTION), saves)
+    open()
 
     await user.click(await screen.findByRole('button', { name: 'Turn ordering on…' }))
-    const dialog = screen.getByRole('dialog', { name: 'Turn ordering on SinoPac on?' })
+    const dialog = await screen.findByRole('dialog', { name: 'Turn ordering on SinoPac on?' })
     expect(within(dialog).getByText('This account is on Production: every order is real money.')).toBeVisible()
-    await user.click(within(dialog).getByRole('button', { name: 'Confirm' }))
+    await confirmWithPassword(user, dialog)
 
-    expect(saved).toEqual([[{ path: 'features.sinopac_ordering', value: 'administrators' }]])
+    await waitFor(() => expect(saves).toEqual([sent([{ path: 'features.sinopac_ordering', value: 'administrators' }])]))
   })
 
   it('shows the starting cash on Simulation only, as all the money put in, and saves a raise', async () => {
     const user = userEvent.setup({ delay: null })
-    const saved: SaveConfirmationProps['changes'][] = []
-    serve(() => json(SIMULATION))
-    open(HOLDER, saved)
+    const saves: unknown[] = []
+    serve(() => json(SIMULATION), saves)
+    open()
 
     expect(await screen.findByText('1,000,000')).toBeVisible()
     expect(screen.getByText('All the money put into the Simulation account. To add money, raise it.')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Change…' }))
-    const field = within(screen.getByRole('dialog', { name: 'Change the starting cash?' })).getByLabelText('Starting cash (NT$)')
+    const dialog = await screen.findByRole('dialog', { name: 'Change the starting cash?' })
+    const field = within(dialog).getByLabelText('Starting cash (NT$)')
     await user.clear(field)
     await user.type(field, '1500000')
-    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await confirmWithPassword(user, dialog)
 
-    expect(saved).toEqual([[{ path: 'shioaji.simulation_initial_cash', value: 1_500_000 }]])
+    await waitFor(() => expect(saves).toEqual([sent([{ path: 'shioaji.simulation_initial_cash', value: 1_500_000 }])]))
   })
 
   it('has no starting cash on Production, and nothing to manage for a holder who does not edit the settings', async () => {

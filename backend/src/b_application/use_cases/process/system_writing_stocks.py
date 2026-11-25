@@ -3,10 +3,12 @@ from datetime import timedelta
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
 from a_domain.ports.ai.system_writing_log import ISystemWritingLog, SystemWriting
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.users_stocks import IUsersStocks
+from a_domain.rules.trading.ranking import latest_decision
+from a_domain.types.errors import RankingUnavailable
 from b_application.config.app_config import AppConfig
 
 
@@ -29,7 +31,7 @@ class SystemWritingStocks:
 
     def __init__(
         self,
-        ohlcv_provider: IOhlcvProvider,
+        ohlcv_provider: IPriceHistoryProvider,
         matrix_provider: IDailyBarMatrixProvider,
         log: ISystemWritingLog,
         briefs: IStockBriefRepository,
@@ -60,8 +62,13 @@ class SystemWritingStocks:
 
         if writing is None:
             history = await self._matrix_provider.load_ranking_history()
-            decisions = self._decision_rule.apply(history.bars.sessions) if history is not None else []
-            ranked = self._ranking_rule.apply(history, *decisions[-1], {}).stocks if history is not None and decisions else []
+
+            try:
+                decision = latest_decision(self._decision_rule, history.bars.sessions) if history is not None else None
+            except RankingUnavailable:
+                decision = None
+
+            ranked = self._ranking_rule.apply(history, *decision, {}).stocks if history is not None and decision else []
             followed = sorted(await self._users_stocks.held_or_watched()) if self._users_stocks_too else []
             stock_ids = list(dict.fromkeys([*(stock.stock_id for stock in ranked), *followed]))
 

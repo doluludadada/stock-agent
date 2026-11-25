@@ -78,8 +78,8 @@ export function validateStrategy(strategy: Strategy): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   if (!strategy.name.trim()) issues.push(issue('name', 'required'))
   const scoreLimit = { min: 0, max: LIMITS.maxBaseScore, integer: true }
-  checkNumber(issues, 'scoring:baseScore', strategy.scoring.baseScore, scoreLimit)
-  for (const key of ['blockFailurePenalty', 'failureScoreReduction', 'passScoreIncrease'] as const) {
+  checkNumber(issues, 'scoring:base_score', strategy.scoring.base_score, scoreLimit)
+  for (const key of ['block_failure_penalty', 'failure_score_reduction', 'pass_score_increase'] as const) {
     checkNumber(issues, `scoring:${key}`, strategy.scoring[key], { min: 0, max: Number.MAX_SAFE_INTEGER, integer: true })
   }
   for (const [id, config] of Object.entries(strategy.indicators)) {

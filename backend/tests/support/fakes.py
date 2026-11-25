@@ -1177,27 +1177,24 @@ class FakeUsersOrders:
 
 class FakeTechnicalSettingsRepository:
     """
-    Like the SQL repository built for one owner: the saved settings, the initial ones saved on the first load, and a
-    save refused, changing nothing, when the revision it carries is no longer the saved one. The next
-    interrupted_loads loads fail as a load does when a save lands between its reads.
+    Like the SQL repository built for one owner: the saved settings, and a save refused, changing nothing, when the
+    revision it carries is no longer the saved one. The next interrupted_loads loads fail as a load does when a save
+    lands between its reads.
     """
 
-    def __init__(self, saved: TechnicalSettings | None = None) -> None:
+    def __init__(self, saved: TechnicalSettings) -> None:
         self.saved = saved
         self.interrupted_loads = 0
 
-    async def load(self, initial: TechnicalSettings) -> TechnicalSettings:
+    async def load(self) -> TechnicalSettings:
         if self.interrupted_loads:
             self.interrupted_loads -= 1
             raise TechnicalSettingsConflictError("The technical settings changed while being read. Read them again.")
 
-        if self.saved is None:
-            self.saved = replace(initial, revision=0)
-
         return self.saved
 
     async def save(self, settings: TechnicalSettings) -> TechnicalSettings:
-        if self.saved is None or self.saved.revision != settings.revision:
+        if self.saved.revision != settings.revision:
             raise TechnicalSettingsConflictError("The technical settings changed after they were read.")
 
         self.saved = replace(settings, revision=settings.revision + 1)

@@ -28,18 +28,25 @@ class TechnicalFilter:
     ) -> list[Stock]:
         self._logger.info(f"Filtering {len(stocks)} stocks with the selected technical strategy.")
         stats.technical_strategy_id = strategy.strategy_id
-        survivors: list[Stock] = []
 
-        for stock in stocks:
-            try:
-                stock.technical_report = strategy.apply(stock)
-            except Exception as error:
-                self._logger.error(stats.add_error(f"Failed to process market data for {stock.stock_id}: {error}"))
-                stock.technical_report = TechnicalReport(score=0, hard_failures=["Technical indicators unavailable"])
-                continue
+        try:
+            reports = strategy.apply(stocks)
+        except Exception:
+            # The one call raised, so each stock is scored alone: a stock whose data the strategy cannot read fails
+            # by itself, and every held stock still gets its own report for its exit decision.
+            reports = []
 
-            if stock.technical_report.passed:
-                survivors.append(stock)
+            for stock in stocks:
+                try:
+                    reports.extend(strategy.apply([stock]))
+                except Exception as error:
+                    self._logger.error(stats.add_error(f"Failed to process market data for {stock.stock_id}: {error}"))
+                    reports.append(TechnicalReport(score=0, hard_failures=["Technical indicators unavailable"]))
+
+        for stock, report in zip(stocks, reports, strict=True):
+            stock.technical_report = report
+
+        survivors = [stock for stock, report in zip(stocks, reports, strict=True) if report.passed]
         rejected_count = len(stocks) - len(survivors)
         stats.passed_technical += len(survivors)
 

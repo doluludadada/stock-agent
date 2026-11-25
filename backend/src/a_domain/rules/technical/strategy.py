@@ -1,23 +1,25 @@
 from collections.abc import Sequence
 from typing import Annotated, Self
 
+import numpy as np
 from pydantic import ConfigDict, Field, NonNegativeInt, model_validator
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.analysis.technical_report import TechnicalObservation, TechnicalReport
+from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.rules.technical.calculation.calculator import IndicatorParameters, indicator_outputs
+from a_domain.rules.technical.calculation.calculator import IndicatorParameters, indicator_outputs, stacked_bars
 from a_domain.rules.technical.formula import (
     Condition,
     DataReference,
-    FormulaInputs,
     IndicatorValue,
     MarketValue,
+    WindowInputs,
     condition_holds,
     references,
 )
-from a_domain.types.enums import RuleEffect
-from a_domain.types.values import FormulaId, NonEmptyText, Score
+from a_domain.types.enums import MarketField, RuleEffect
+from a_domain.types.values import Flags, Floats, FormulaId, Integers, NonEmptyText, Score
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
@@ -119,32 +121,22 @@ class TechnicalStrategy:
         )
         return max(needs, default=1)
 
-    def apply(self, stock: Stock) -> TechnicalReport:
+    def apply(self, stocks: Sequence[Stock]) -> list[TechnicalReport]:
         """
-        A stock with fewer daily bars than required_bars, or whose formulas read an unavailable input, divide by zero
-        or reach a number too large to be finite, fails with score 0: no rule's result stands in for missing data.
+        Each stock's report on its daily bars and latest price, in order. A stock with fewer daily bars than
+        required_bars, or whose formulas read an unavailable input, divide by zero or reach a number too large to be
+        finite, fails with score 0: no rule's result stands in for missing data.
         """
-        bars = tuple(sorted(stock.ohlcv, key=lambda bar: bar.ts))
-
-        if len(bars) < self.required_bars:
-            return TechnicalReport(score=0, hard_failures=[f"Need {self.required_bars} daily bars; received {len(bars)}"])
-
-        read = {
-            (reference.indicator_id, reference.bars_ago + shift)
-            for rule in self.rules
-            for reference, shift in references(rule.condition)
-            if isinstance(reference, IndicatorValue)
-        }
-        outputs = {key: indicator_outputs(self.indicators[key[0]], bars[: len(bars) - key[1]]) for key in read}
-        inputs = FormulaInputs(bars=bars, latest_price=stock.current_price, indicators=outputs)
-        results = [condition_holds(rule.condition, inputs) for rule in self.rules]
-        passed = [result for result in results if result is not None]
-
-        if len(passed) < len(results):
-            unavailable = ", ".join(rule.name for rule, result in zip(self.rules, results, strict=True) if result is None)
-            return TechnicalReport(score=0, hard_failures=[f"Technical data unavailable: {unavailable}"])
-
-        return self.scoring.apply(self.rules, passed)
+        required_bars = self.required_bars
+        histories = [sorted(stock.ohlcv, key=lambda bar: bar.ts) for stock in stocks]
+        scored = [(stock, bars) for stock, bars in zip(stocks, histories, strict=True) if len(bars) >= required_bars]
+        reports = iter(window_reports(self, scored))
+        return [
+            next(reports)
+            if len(bars) >= required_bars
+            else TechnicalReport(score=0, hard_failures=[f"Need {required_bars} daily bars; received {len(bars)}"])
+            for bars in histories
+        ]
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
@@ -173,3 +165,64 @@ class TechnicalSettings:
     @property
     def active_strategy(self) -> TechnicalStrategy:
         return next(strategy for strategy in self.strategies if strategy.strategy_id == self.active_strategy_id)
+
+
+def window_reports(strategy: TechnicalStrategy, scored: Sequence[tuple[Stock, Sequence[Ohlcv]]]) -> list[TechnicalReport]:
+    """Each stock's report, its sorted daily bars one window of one matrix call; each holds at least required_bars."""
+    if not scored:
+        return []
+
+    lengths = np.array([len(bars) for _, bars in scored], dtype=np.int64)
+    prices = np.array([np.nan if stock.current_price is None else stock.current_price for stock, _ in scored], dtype=np.float64)
+    results = rule_results(
+        strategy, stacked_bars([bar for _, bars in scored for bar in bars]), np.cumsum(lengths) - 1, lengths, prices
+    )
+    return [
+        rules_report(strategy, [(holds[window], available[window]) for holds, available in results]) for window in range(len(scored))
+    ]
+
+
+def rules_report(strategy: TechnicalStrategy, results: Sequence[tuple[np.bool_, np.bool_]]) -> TechnicalReport:
+    """The strategy's report on one window from whether each rule holds there and whether its inputs are available."""
+    unavailable = [rule.name for rule, (_, available) in zip(strategy.rules, results, strict=True) if not available]
+
+    if unavailable:
+        return TechnicalReport(score=0, hard_failures=[f"Technical data unavailable: {', '.join(unavailable)}"])
+
+    return strategy.scoring.apply(strategy.rules, [bool(holds) for holds, _ in results])
+
+
+def rule_results(
+    strategy: TechnicalStrategy, bars: dict[MarketField, Floats], ends: Integers, lengths: Integers, latest_price: Floats
+) -> list[tuple[Flags, Flags]]:
+    """
+    Where each rule holds, and where every input it reads is available, in each window: window `i` is the `lengths[i]`
+    stacked bars up to `ends[i]`, with `latest_price[i]` as its latest price.
+    """
+    first = int((ends - lengths).min()) + 1
+    span = {field: values[first : int(ends.max()) + 1] for field, values in bars.items()}
+    latest = ends - first
+
+    with np.errstate(all="ignore"):
+        windows = np.minimum(latest - lengths + 1 + np.arange(int(lengths.max()))[:, None], len(span[MarketField.CLOSE]) - 1)
+        indicators = {
+            (indicator_id, bars_ago): outputs
+            for indicator_id, reads in indicator_shifts(strategy.rules).items()
+            for bars_ago, outputs in indicator_outputs(
+                strategy.indicators[indicator_id], span, windows, latest, lengths, reads
+            ).items()
+        }
+        inputs = WindowInputs(bars=span, ends=latest, latest_price=latest_price, indicators=indicators)
+        return [condition_holds(rule.condition, inputs) for rule in strategy.rules]
+
+
+def indicator_shifts(rules: Sequence[TechnicalRule]) -> dict[FormulaId, set[int]]:
+    """How many bars back the rules read each indicator."""
+    shifts: dict[FormulaId, set[int]] = {}
+
+    for rule in rules:
+        for reference, shift in references(rule.condition):
+            if isinstance(reference, IndicatorValue):
+                shifts.setdefault(reference.indicator_id, set()).add(reference.bars_ago + shift)
+
+    return shifts

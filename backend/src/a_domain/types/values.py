@@ -4,6 +4,8 @@ from dataclasses import replace
 from datetime import date
 from typing import Annotated, Self, override
 
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import AfterValidator, Field, SecretStr
 from pydantic.dataclasses import dataclass
 
@@ -29,6 +31,12 @@ type BarsAgo = Annotated[int, Field(ge=0, le=250, strict=True)]
 
 type FormulaId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
 """A stable identifier inside a strategy, such as a strategy's or an indicator's. It never holds a parameter."""
+
+type Floats = NDArray[np.float64]
+
+type Flags = NDArray[np.bool_]
+
+type Integers = NDArray[np.int64]
 
 
 type Username = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$")]

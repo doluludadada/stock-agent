@@ -41,7 +41,6 @@ const thin: StockAnalysis = {
   earnings: {
     quarters: [quarter(2025, 2, 30, null, null), quarter(2026, 2, 36, null, 0.2)],
     eps_growing_quarters: 1,
-    filed_eps_fetched_at: '2026-10-19T10:00:00+08:00',
   },
   valuation: {
     session_date: '2026-11-12',

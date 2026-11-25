@@ -149,6 +149,29 @@ async def test_reads_at_once_of_an_empty_stock_list_download_it_once(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_a_listing_that_fails_leaves_no_stock_of_either_market_and_the_next_read_downloads_both_again(
+    monkeypatch, payloads: dict[str, list[dict[str, str]]]
+) -> None:
+    failing = {SOURCES.exchange.tpex_daily_quotes_url}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) in failing:
+            return httpx.Response(503)
+
+        return httpx.Response(200, json=payloads[str(request.url)])
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(handler)))
+    provider = make_provider()
+
+    assert (await provider.get_all(), await provider.get_latest_closes()) == ([], {})
+
+    failing.clear()
+
+    assert {stock.market for stock in await provider.get_all()} == {MarketType.TWSE, MarketType.TPEX}
+
+
+@pytest.mark.asyncio
 async def test_closes_come_from_the_cached_stock_list_download(requests: list[httpx.Request]) -> None:
     provider = make_provider()
 
@@ -328,7 +351,7 @@ def test_an_announcement_without_a_valid_date_time_or_company_is_left_out_and_a_
         "第51款",
         None,
     )
-    for broken in ({"發言日期": "115/11/05"}, {"發言時間": "250000"}, {"公司代號": " "}):
+    for broken in ({"發言日期": "1151305"}, {"發言時間": "250000"}, {"公司代號": " "}):
         assert parse_announcement(row | broken, MarketType.TWSE, fetched_at, SOURCES.exchange, clock) is None
 
 

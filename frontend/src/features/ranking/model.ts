@@ -1,5 +1,6 @@
 import type { Audience, Broker, Schemas } from '@/shared/api'
 import { isIsoDate, monthsBefore, periodProblems, type Period, type PeriodProblem } from '@/shared/lib/dates'
+import type { ComparisonPoint } from '@/shared/ui/comparison-chart'
 
 export type Ranking = Schemas['Ranking']
 export type RankedStock = Schemas['RankedStock']
@@ -225,15 +226,8 @@ export function cashDecisions(backtest: Pick<RankingBacktest, 'rankings'>): numb
   return backtest.rankings.filter((ranking) => ranking.holds_cash).length
 }
 
-/** One session of both curves as what 1 put in at the first decision is worth. */
-export interface GrowthPoint {
-  date: string
-  value: number
-  /** Null when the history holds no benchmark. */
-  benchmark: number | null
-}
-
-export function growthCurve(backtest: Pick<RankingBacktest, 'equity_curve' | 'benchmark_curve'>): GrowthPoint[] {
+/** Both curves as what 1 put in at the first decision is worth, each session; the benchmark is null when the history holds none. */
+export function growthCurve(backtest: Pick<RankingBacktest, 'equity_curve' | 'benchmark_curve'>): ComparisonPoint[] {
   return sessionsOf(backtest.equity_curve).map((date) => ({ date, value: backtest.equity_curve[date]!, benchmark: backtest.benchmark_curve[date] ?? null }))
 }
 
@@ -242,12 +236,12 @@ export type Scale = 'log' | 'linear'
 /** A curve that multiplies several times over flattens everything else on a linear axis, so it starts on a log one. */
 const LOG_FROM_RATIO = 4
 
-function extent(points: readonly GrowthPoint[]): [number, number] {
+function extent(points: readonly ComparisonPoint[]): [number, number] {
   const values = points.flatMap((point) => (point.benchmark === null ? [point.value] : [point.value, point.benchmark]))
   return [Math.min(...values), Math.max(...values)]
 }
 
-export function defaultScale(points: readonly GrowthPoint[]): Scale {
+export function defaultScale(points: readonly ComparisonPoint[]): Scale {
   const [low, high] = extent(points)
   return high / low >= LOG_FROM_RATIO ? 'log' : 'linear'
 }
@@ -260,7 +254,7 @@ const DECADE_STEPS = [
 const FEWEST_TICKS = 3
 
 /** The log axis of a curve: its bounds a little outside the values, and round multiples between them as ticks. */
-export function logAxis(points: readonly GrowthPoint[]): { domain: [number, number]; ticks: number[] } {
+export function logAxis(points: readonly ComparisonPoint[]): { domain: [number, number]; ticks: number[] } {
   const [low, high] = extent(points)
   const domain: [number, number] = [low * 0.95, high * 1.05]
   const decades = Array.from({ length: Math.ceil(Math.log10(domain[1])) - Math.floor(Math.log10(domain[0])) + 1 }, (_, index) => 10 ** (Math.floor(Math.log10(domain[0])) + index))

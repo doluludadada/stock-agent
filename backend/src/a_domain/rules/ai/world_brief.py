@@ -1,13 +1,14 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, time, timedelta
 
 from pydantic import PositiveInt
 from pydantic.dataclasses import dataclass
 
-from a_domain.model.analysis.stock_brief import BriefSource, StockBrief
+from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.model.market.article import Article
 from a_domain.model.market.world_indicator import IndicatorReading
-from a_domain.rules.ai.stock_brief import BriefContext, BriefFact, article_fact
+from a_domain.rules.ai.stock_brief import BriefContext, BriefFact, article_fact, held_fact, keyed_facts
 from a_domain.types.enums import BriefSourceKind, BriefStatus, MarketScope
 
 
@@ -100,13 +101,14 @@ class WorldBriefContextRule:
         fresh = [reading for reading in readings if reading.day >= now.date() - timedelta(days=self.indicator_days)]
         recent = [article for article in retrieved or articles if since <= article.published_at <= now]
         newest_first = sorted(recent, key=lambda article: article.published_at, reverse=True)
-        found: dict[str, tuple[BriefSourceKind, Article | IndicatorReading]] = {
-            indicator_line(reading): (BriefSourceKind.INDICATOR, reading) for reading in fresh
-        }
+        indicators = [held_fact(BriefSourceKind.INDICATOR, reading.day, indicator_line(reading)) for reading in fresh]
+        found = {fact.text: fact for fact in indicators}
 
         for article in newest_first[: self.articles]:
-            kind, _, text, _, _ = article_fact(article, self.article_text_length)
-            found.setdefault(f"{article.source.label}: {text}", (kind, article))
+            fact = article_fact(article, self.article_text_length)
+            said = f"{article.source.label}: {fact.text}"
+            source = replace(fact.source, origin=article.source)
+            found.setdefault(said, BriefFact(source=source, text=said, stocks=named_stocks(said, listed, self.stock_name_length)))
 
         return BriefContext(
             stock_id=MarketScope.WORLD.value,
@@ -114,26 +116,5 @@ class WorldBriefContextRule:
             window_first=since.date(),
             window_last=now.date(),
             price_change=None,
-            facts=world_facts(found, listed, self.stock_name_length),
+            facts=keyed_facts(found.values()),
         )
-
-
-def world_facts(
-    found: Mapping[str, tuple[BriefSourceKind, Article | IndicatorReading]], listed: Mapping[str, str], name_length: PositiveInt
-) -> list[BriefFact]:
-    """
-    The held readings and world news items found, each under its text, as the facts S1, S2 and so on in their order. A
-    news item's fact carries the listed stocks its text names (named_stocks).
-    """
-    facts: list[BriefFact] = []
-
-    for number, (text, (kind, item)) in enumerate(found.items(), 1):
-        if isinstance(item, IndicatorReading):
-            facts.append(BriefFact(source=BriefSource(key=f"S{number}", kind=kind, dated=item.day), text=text))
-            continue
-
-        title, dated = " ".join(item.title.split()), item.published_at.date()
-        source = BriefSource(key=f"S{number}", kind=kind, dated=dated, title=title, url=item.url, origin=item.source)
-        facts.append(BriefFact(source=source, text=text, stocks=named_stocks(text, listed, name_length)))
-
-    return facts

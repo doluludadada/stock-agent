@@ -96,7 +96,10 @@ async def test_dev_refuses_to_start_while_a_production_credential_is_in_the_envi
 ) -> None:
     monkeypatch.setenv(credential, SECRET)
     config = trading_config(SIMULATION, DEV)
-    config.shioaji = ShioajiConfig(_env_file=None, **config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
+    config.shioaji = ShioajiConfig(
+        _env_file=None,
+        **config.shioaji.model_dump(include={"server", "poll_interval_seconds", "max_polls", "simulation_initial_cash"}),
+    )
 
     with pytest.raises(TradingSetupError) as refused:
         validate_trading_environment(config)
@@ -109,7 +112,9 @@ async def test_a_production_credential_in_dot_env_stops_a_dev_machine_too(tmp_pa
     (tmp_path / ".env").write_text(f'SHIOAJI_CA_PASSWORD="{SECRET}"\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     config = trading_config(SIMULATION, DEV)
-    config.shioaji = ShioajiConfig(**config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
+    config.shioaji = ShioajiConfig(
+        **config.shioaji.model_dump(include={"server", "poll_interval_seconds", "max_polls", "simulation_initial_cash"})
+    )
 
     with pytest.raises(TradingSetupError, match="environment dev refuses to start while SHIOAJI_CA_PASSWORD is set") as refused:
         validate_trading_environment(config)

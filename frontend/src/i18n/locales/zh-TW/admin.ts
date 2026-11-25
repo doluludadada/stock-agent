@@ -637,25 +637,7 @@ const admin: DictionaryShape<typeof en> = {
     ai_model_id_missing: '{{provider}} 需要在 ai.available_models.{{provider}} 設定模型代號，否則應用程式不會啟動。',
     search_on_open_data: '使用對象為 {{audience}} 時必須是 false：搜尋會帶入新聞網站與 X 的內容，這個網站不得使用。',
   },
-  password: {
-    title: '儲存設定？',
-    description: '輸入你的密碼確認，伺服器會立即改用新設定。',
-    label: '你的密碼',
-    wrong: '密碼不正確，沒有儲存任何內容。',
-    throttledMinutes: '密碼錯誤太多次，請在 {{minutes}} 分 {{seconds}} 秒後再試。',
-    throttledSeconds: '密碼錯誤太多次，請在 {{seconds}} 秒後再試。',
-    failed: '沒有儲存成功：{{reason}}',
-    confirm: '儲存並套用',
-    saving: '儲存中…',
-    cancel: '取消',
-    show: '顯示密碼',
-    hide: '隱藏密碼',
-  },
   google: {
-    title: '儲存設定？',
-    description: '你的帳號沒有密碼，因此要重新登入 Google 來確認。回到這裡後會立即送出儲存，伺服器隨即改用新設定。',
-    confirm: '用 Google 確認',
-    cancel: '取消',
     saving: '正在儲存你用 Google 確認的修改…',
     refused: {
       stale_authentication: 'Google 沒有要求你重新登入，因此沒有確認這次儲存。請先登出 Google 再重新登入後儲存，或在伺服器上用 just reset-password 設定密碼。',
@@ -664,12 +646,6 @@ const admin: DictionaryShape<typeof en> = {
       throttled: '這個位址嘗試太多次，請稍後再試。',
       failed: 'Google 的確認沒有成功，沒有儲存任何內容。',
     },
-  },
-  reason: {
-    administratorsOnly: '這個帳號已不是管理員。',
-    passwordRequired: '這個操作需要你的密碼。',
-    fileRefused: '伺服器不讀寫這個設定檔：它是符號連結、不在設定資料夾內，或檔案太大。',
-    fileMissing: '伺服器上沒有這個設定檔。',
   },
   leave: {
     title: '離開這個頁面？',

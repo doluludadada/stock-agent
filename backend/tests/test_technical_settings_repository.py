@@ -63,9 +63,9 @@ async def other_process(tmp_path: Path, db: DatabaseConnector) -> AsyncIterator[
     await connector.close()
 
 
-def of(db: DatabaseConnector, owner: str) -> SqlTechnicalSettingsRepository:
-    """The settings repository dependencies.py builds for one owner."""
-    return SqlTechnicalSettingsRepository(db.for_owner(UserId(owner)))
+def of(db: DatabaseConnector, owner: str, initial: TechnicalSettings = INITIAL) -> SqlTechnicalSettingsRepository:
+    """The settings repository dependencies.py builds for one owner, with `initial` as technical.initial_settings."""
+    return SqlTechnicalSettingsRepository(db.for_owner(UserId(owner)), initial)
 
 
 def with_period(strategy: TechnicalStrategy, indicator_id: str, period: int) -> TechnicalStrategy:
@@ -89,40 +89,40 @@ async def count_rows(table: str, owner_id: str) -> int:
 
 async def test_a_first_load_saves_the_initial_settings_at_revision_0_and_a_later_load_never_resets_them(db: DatabaseConnector) -> None:
 
-    first = await of(db, "alice").load(replace(INITIAL, revision=7))
-    later = await of(db, "alice").load(OTHER_INITIAL)
+    first = await of(db, "alice", replace(INITIAL, revision=7)).load()
+    later = await of(db, "alice", OTHER_INITIAL).load()
 
     assert first == later == INITIAL
     assert first.revision == 0
 
 
 async def test_a_save_from_the_revision_read_replaces_the_settings_and_counts_up(db: DatabaseConnector) -> None:
-    read = await of(db, "alice").load(INITIAL)
+    read = await of(db, "alice").load()
     edited = replace(read, active_strategy_id="aggressive")
 
     saved = await of(db, "alice").save(edited)
 
     assert saved == replace(edited, revision=1)
-    assert await of(db, "alice").load(INITIAL) == saved
+    assert await of(db, "alice").load() == saved
     assert (await of(db, "alice").save(saved)).revision == 2
-    assert (await of(db, "alice").load(OTHER_INITIAL)).revision == 2
+    assert (await of(db, "alice", OTHER_INITIAL).load()).revision == 2
 
 
 async def test_a_save_from_an_older_revision_is_refused_and_changes_nothing(db: DatabaseConnector) -> None:
-    read = await of(db, "alice").load(INITIAL)
+    read = await of(db, "alice").load()
     first = await of(db, "alice").save(replace(read, active_strategy_id="aggressive"))
 
     with pytest.raises(TechnicalSettingsConflictError):
         await of(db, "alice").save(replace(read, active_strategy_id="conservative"))
 
-    assert await of(db, "alice").load(INITIAL) == first
+    assert await of(db, "alice").load() == first
 
 
 async def test_an_owner_keeps_the_built_ins_that_no_longer_ship_and_the_one_of_them_in_use(db: DatabaseConnector) -> None:
-    held = await of(db, "alice").save(replace(await of(db, "alice").load(INITIAL), active_strategy_id="aggressive"))
+    held = await of(db, "alice").save(replace(await of(db, "alice").load(), active_strategy_id="aggressive"))
 
     assert [strategy.strategy_id for strategy in SHIPPED.strategies] == ["balanced"]
-    assert await of(db, "alice").load(SHIPPED) == held
+    assert await of(db, "alice", SHIPPED).load() == held
     assert [strategy.strategy_id for strategy in held.strategies] == ["conservative", "balanced", "aggressive"]
     assert held.active_strategy.strategy_id == "aggressive"
 
@@ -132,13 +132,13 @@ async def test_a_save_for_an_owner_who_never_loaded_is_refused_and_creates_nothi
     with pytest.raises(TechnicalSettingsConflictError):
         await of(db, "nobody").save(INITIAL)
 
-    assert await of(db, "nobody").load(OTHER_INITIAL) == OTHER_INITIAL
+    assert await of(db, "nobody", OTHER_INITIAL).load() == OTHER_INITIAL
 
 
 async def test_of_two_saves_from_one_revision_in_two_processes_one_wins_and_the_other_changes_nothing(
     db: DatabaseConnector, other_process: DatabaseConnector
 ) -> None:
-    read = await of(db, "alice").load(INITIAL)
+    read = await of(db, "alice").load()
 
     results = await asyncio.gather(
         of(db, "alice").save(replace(read, active_strategy_id="aggressive")),
@@ -149,20 +149,20 @@ async def test_of_two_saves_from_one_revision_in_two_processes_one_wins_and_the_
     [winner] = [result for result in results if isinstance(result, TechnicalSettings)]
     assert [type(result) for result in results if not isinstance(result, TechnicalSettings)] == [TechnicalSettingsConflictError]
     assert winner.revision == 1
-    assert await of(db, "alice").load(INITIAL) == winner
+    assert await of(db, "alice").load() == winner
 
 
 async def test_each_owner_has_independent_settings(db: DatabaseConnector) -> None:
-    alice, bob = await of(db, "alice").load(INITIAL), await of(db, "bob").load(INITIAL)
+    alice, bob = await of(db, "alice").load(), await of(db, "bob").load()
 
     alice_saved = await of(db, "alice").save(
         replace(alice, strategies=(with_period(alice.strategies[1], "ind_a", 37),), active_strategy_id="balanced")
     )
 
-    assert await of(db, "bob").load(INITIAL) == bob == INITIAL
+    assert await of(db, "bob").load() == bob == INITIAL
     bob_saved = await of(db, "bob").save(replace(bob, active_strategy_id="aggressive"))
     assert bob_saved.revision == 1
-    assert await of(db, "alice").load(INITIAL) == alice_saved
+    assert await of(db, "alice").load() == alice_saved
     assert [strategy.strategy_id for strategy in alice_saved.strategies] == ["balanced"]
 
 
@@ -172,7 +172,7 @@ async def test_two_processes_loading_a_new_owner_at_once_save_the_initial_settin
     owners = [f"owner_{number}" for number in range(5)]
 
     loads = await asyncio.gather(
-        *(load for owner in owners for load in (of(db, owner).load(INITIAL), of(other_process, owner).load(OTHER_INITIAL)))
+        *(load for owner in owners for load in (of(db, owner).load(), of(other_process, owner, OTHER_INITIAL).load()))
     )
 
     for owner, mine, theirs in zip(owners, loads[::2], loads[1::2], strict=True):
@@ -186,7 +186,7 @@ async def test_two_processes_loading_a_new_owner_at_once_save_the_initial_settin
 
 
 async def test_a_copy_of_a_built_in_strategy_changes_alone(db: DatabaseConnector) -> None:
-    read = await of(db, "alice").load(INITIAL)
+    read = await of(db, "alice").load()
     balanced = read.active_strategy
     copies = (
         replace(balanced, strategy_id="my_balanced", name="My Balanced"),
@@ -204,7 +204,7 @@ async def test_a_copy_of_a_built_in_strategy_changes_alone(db: DatabaseConnector
         )
     )
 
-    loaded = await of(db, "alice").load(INITIAL)
+    loaded = await of(db, "alice").load()
     assert loaded == edited
     assert {strategy.strategy_id: strategy.indicators["ind_b"].period for strategy in loaded.strategies} == {
         "conservative": 60,
@@ -219,13 +219,13 @@ async def test_a_copy_of_a_built_in_strategy_changes_alone(db: DatabaseConnector
 
 async def test_saving_settings_never_changes_the_built_in_strategy_files(db: DatabaseConnector) -> None:
     files = {path.name: path.read_bytes() for path in STRATEGY_FILES.glob("*.json")}
-    read = await of(db, "alice").load(INITIAL)
+    read = await of(db, "alice").load()
 
     await of(db, "alice").save(replace(read, strategies=tuple(with_period(strategy, "ind_a", 37) for strategy in read.strategies)))
 
     assert {path.name: path.read_bytes() for path in STRATEGY_FILES.glob("*.json")} == files
     assert shipped_config().technical.built_in_strategies == (BALANCED,)
-    assert all(strategy.indicators["ind_a"].period == 37 for strategy in (await of(db, "alice").load(INITIAL)).strategies)
+    assert all(strategy.indicators["ind_a"].period == 37 for strategy in (await of(db, "alice").load()).strategies)
 
 
 # --------------------------------- Round trip --------------------------------- #
@@ -327,11 +327,11 @@ async def test_settings_keep_every_formula_through_json_and_sql(tmp_path: Path, 
     assert unused_formula_words() == []
     document = settings_json()
     settings = SETTINGS.validate_json(json.dumps(document))
-    await of(db, "alice").load(settings)
+    await of(db, "alice", settings).load()
     reopened = open_database(tmp_path)
 
     try:
-        loaded = await of(reopened, "alice").load(OTHER_INITIAL)
+        loaded = await of(reopened, "alice", OTHER_INITIAL).load()
     finally:
         await reopened.close()
 
@@ -371,14 +371,14 @@ def node_row(**columns: Any) -> dict[str, Any]:
     ],
 )
 async def test_the_database_refuses_rows_that_break_a_formula(db: DatabaseConnector, table: type, row: dict[str, Any]) -> None:
-    read = await of(db, "alice").load(INITIAL)
+    read = await of(db, "alice").load()
 
     with pytest.raises(IntegrityError):
         async with db.for_owner(UserId("alice")).owner_session() as session:
             await session.execute(insert(table), [row])
             await session.commit()
 
-    assert await of(db, "alice").load(INITIAL) == read
+    assert await of(db, "alice").load() == read
 
 
 def nodes_of(node: str) -> Update:
@@ -398,11 +398,11 @@ def nodes_of(node: str) -> Update:
 )
 async def test_rows_the_domain_model_refuses_are_never_read_as_settings(db: DatabaseConnector, change: Update) -> None:
     """The tables leave these checks to the domain model, which validates every row it reads."""
-    await of(db, "alice").load(INITIAL)
+    await of(db, "alice").load()
 
     async with db.for_owner(UserId("alice")).owner_session() as session:
         await session.execute(change)
         await session.commit()
 
     with pytest.raises(ValidationError):
-        await of(db, "alice").load(INITIAL)
+        await of(db, "alice").load()

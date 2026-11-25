@@ -3,7 +3,7 @@ from time import perf_counter
 
 from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -36,7 +36,7 @@ class BacktestRun:
         self,
         matrix_provider: IDailyBarMatrixProvider,
         stock_provider: IStockProvider,
-        ohlcv_provider: IOhlcvProvider,
+        ohlcv_provider: IPriceHistoryProvider,
         backtest_repository: IBacktestRepository,
         market_clock: IMarketClock,
         config: AppConfig,

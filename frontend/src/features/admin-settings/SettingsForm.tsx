@@ -1,12 +1,13 @@
 import { ChevronDown, Minus, Plus, Search, TriangleAlert } from 'lucide-react'
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { Link, useBlocker, useNavigate, useSearchParams } from 'react-router'
+import { memo, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { useSession, type PageRefusal } from '@/shared/api'
+import { confirmationRefusal, reasonOf, refusalOf, takePendingSave, useSaveSettings, useSession, type PageRefusal, type PendingSave, type SettingsProblem } from '@/shared/api'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { clockTime, useFormat } from '@/shared/lib/format'
 import { useKeptDraft } from '@/shared/lib/kept-draft'
+import { useLeaveGuard } from '@/shared/lib/leave-guard'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Checkbox } from '@/shared/ui/checkbox'
@@ -16,10 +17,11 @@ import { Input } from '@/shared/ui/input'
 import { Label } from '@/shared/ui/label'
 import { fitsSegmented, Segmented } from '@/shared/ui/segmented'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { SaveConfirmation } from '@/shared/ui/save-confirmation'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Switch } from '@/shared/ui/switch'
 import { Textarea } from '@/shared/ui/textarea'
-import { useSaveSettings, useSettingsForm } from './api'
+import { useSettingsForm } from './api'
 import {
   changesOf,
   choiceEntriesOf,
@@ -28,6 +30,7 @@ import {
   GROUPS,
   groupsOf,
   inputOf,
+  inputsOf,
   isLongText,
   isNamedOption,
   MANAGED_ELSEWHERE,
@@ -42,9 +45,7 @@ import {
   type SettingField,
   type SettingGroup,
 } from './form'
-import { confirmationRefusal, inputsOf, takePendingSave, type PendingSave } from './googleConfirmation'
-import { problemMessage, reasonOf, refusalOf, type SettingsProblem } from './model'
-import { SaveConfirmation } from './SaveConfirmation'
+import { problemMessage } from './model'
 
 /** What a save was refused for: the server's problems, each at its setting, or one sentence of the form's own. */
 interface Refused {
@@ -95,8 +96,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
   useEffect(() => draft.track(dirty ? inputs : null), [draft, dirty, inputs])
   const session = useSession()
   const byGoogle = session.status === 'signedIn' && !session.user.has_password
-  const toGoogle = useRef(false)
-  const blocker = useLeaveGuard(dirty, toGoogle)
+  const { blocker, release } = useLeaveGuard(dirty, 'stays')
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const outcome = params.get('google')
@@ -254,9 +254,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
         changes={changes}
         onSaved={saved}
         onRefused={refuse}
-        onLeave={() => {
-          toGoogle.current = true
-        }}
+        onLeave={() => release('document')}
       />
       <ConfirmDialog
         open={blocker.state === 'blocked'}
@@ -627,20 +625,4 @@ function Range({ field, value, label, described, onChange }: RangeProps) {
       )}
     </fieldset>
   )
-}
-
-/**
- * Asks before leaving the page while a change is not saved. Closing or reloading the tab asks the browser's own
- * question, except on the way to Google to confirm a save: the changes wait in the session storage and come back.
- */
-function useLeaveGuard(unsaved: boolean, toGoogle: RefObject<boolean>) {
-  useEffect(() => {
-    if (!unsaved) return
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!toGoogle.current) event.preventDefault()
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [unsaved, toGoogle])
-  return useBlocker(({ currentLocation, nextLocation }) => unsaved && currentLocation.pathname !== nextLocation.pathname)
 }

@@ -1,11 +1,12 @@
 import { useTranslation } from '@/i18n'
+import { useStrategyLabels } from '@/shared/lib/strategy-labels'
 import { Badge } from '@/shared/ui/badge'
 import { ScrollArea } from '@/shared/ui/scroll-area'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/shared/ui/sheet'
 import { describeIndicator } from '../model/describe'
 import type { IndicatorConfig, Strategy } from '../model/types'
 import { requiredBars } from '../model/validate'
-import { useFormulaText, useStrategyLabels } from '../use-formula-text'
+import { useFormulaText } from '../use-formula-text'
 import { RuleSummaryList } from './RuleSummaryList'
 
 interface StrategyRulesSheetProps {
@@ -54,7 +55,7 @@ export function StrategyRulesSheet({ strategy, onOpenChange }: StrategyRulesShee
                   </div>
                   <div className="rounded-xl border p-3">
                     <div className="text-xs text-muted-foreground">{t('sheet.baseScore')}</div>
-                    <div className="tabular mt-1 font-semibold">{strategy.scoring.baseScore}</div>
+                    <div className="tabular mt-1 font-semibold">{strategy.scoring.base_score}</div>
                   </div>
                 </section>
               </div>

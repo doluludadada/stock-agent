@@ -1,10 +1,9 @@
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts'
 import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent'
+import type { ValuePoint } from './value-chart'
 
 /** One session of the two lines; the benchmark is null on a session it has no value for. */
-export interface ComparisonPoint {
-  date: string
-  value: number
+export interface ComparisonPoint extends ValuePoint {
   benchmark: number | null
 }
 

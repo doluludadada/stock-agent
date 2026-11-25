@@ -1,3 +1,4 @@
+import type { ValuePoint } from '@/shared/ui/value-chart'
 import type { AccountHistory, BrokerageAccount } from './api'
 
 export type AccountValue = AccountHistory['current']
@@ -23,13 +24,8 @@ export function unrealizedRatio(value: AccountValue): number {
   return cost ? value.unrealized_pnl / cost : 0
 }
 
-export interface EquityPoint {
-  date: string
-  value: number
-}
-
 /** The daily equity, oldest first. */
-export function equityPoints(history: AccountHistory): EquityPoint[] {
+export function equityPoints(history: AccountHistory): ValuePoint[] {
   return Object.entries(history.equity_curve)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, value]) => ({ date, value: value.equity }))
@@ -41,7 +37,7 @@ export interface Move {
 }
 
 /** From one point to another; null when there is no earlier point or it was zero. */
-export function moveBetween(from: EquityPoint | undefined, to: EquityPoint | undefined): Move | null {
+export function moveBetween(from: ValuePoint | undefined, to: ValuePoint | undefined): Move | null {
   if (!from || !to || from.value === 0) return null
   return { change: to.value - from.value, ratio: (to.value - from.value) / from.value }
 }

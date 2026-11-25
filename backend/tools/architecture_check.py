@@ -292,10 +292,10 @@ PORT_CALLERS_EXEMPT = frozenset(
 Port methods that only their own adapter calls, left on the port until the owner rules on them. Each but the last is
 a step of one of its adapter's port methods that reads or writes most of what the adapter holds, its locks, its
 cached state, its source, the database and the clock: as a module-level function it would take eight to ten
-arguments, or the adapter itself. ICachedPriceProvider.sync_session, IBrokerExecutionProvider.place and
-ISimulatedExecutionProvider.fill are steps of the same kind, which the name match does not report: another file
-reads the same name on something else. IAttemptLog.record is the log's one write, which admit makes under each key;
-the attempt-log tests pin its windows and its sweep through it.
+arguments, or the adapter itself. ICachedPriceProvider.sync_session and ISimulatedExecutionProvider.fill are steps
+of the same kind, which the name match does not report: another file reads the same name on something else.
+IAttemptLog.record is the log's one write, which admit makes under each key; the attempt-log tests pin its windows and
+its sweep through it.
 """
 INFRASTRUCTURE_RULES = {
     # The port promises each post's stance, whatever model reads it. The prompt and the reply's contract are how the

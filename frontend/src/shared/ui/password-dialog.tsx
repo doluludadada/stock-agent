@@ -1,12 +1,12 @@
 import { LoaderCircle, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { useTranslation } from '@/i18n'
+import { reasonOf, type SaveRefusal } from '@/shared/api'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Field } from '@/shared/ui/field'
 import { PasswordInput } from '@/shared/ui/password-input'
-import { reasonOf, type SaveRefusal } from './model'
 
 /** The refusals the dialog answers in place; the form answers the others. */
 export type DialogRefusal = Extract<SaveRefusal, { kind: 'wrongPassword' | 'throttled' | 'failed' }>
@@ -30,7 +30,7 @@ interface PasswordDialogProps {
  * the attempt limit and a lost connection keep the dialog open.
  */
 export function PasswordDialog({ open, onOpenChange, onConfirm, title, description, children, ready = true }: PasswordDialogProps) {
-  const { t } = useTranslation('admin')
+  const { t } = useTranslation()
   const [pending, setPending] = useState(false)
   const [throttledUntil, setThrottledUntil] = useState<number | null>(null)
   const field = useRef<HTMLInputElement>(null)
@@ -45,8 +45,8 @@ export function PasswordDialog({ open, onOpenChange, onConfirm, title, descripti
         }}
       >
         <DialogHeader>
-          <DialogTitle className="text-title">{title ?? t('password.title')}</DialogTitle>
-          <DialogDescription className="text-pretty">{description ?? t('password.description')}</DialogDescription>
+          <DialogTitle className="text-title">{title ?? t('settingsSave.password.title')}</DialogTitle>
+          <DialogDescription className="text-pretty">{description ?? t('settingsSave.password.description')}</DialogDescription>
         </DialogHeader>
         {children}
         <PasswordForm
@@ -77,7 +77,7 @@ interface PasswordFormProps {
 
 /** The dialog's body; it mounts each time the dialog opens, so a password typed before never comes back. */
 function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttledUntil, onThrottled, ready }: PasswordFormProps) {
-  const { t } = useTranslation('admin')
+  const { t } = useTranslation()
   const reason = useErrorReason()
   const [password, setPassword] = useState('')
   const [refusal, setRefusal] = useState<DialogRefusal | null>(null)
@@ -102,22 +102,22 @@ function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttl
   const message =
     wait > 0
       ? wait >= 60
-        ? t('password.throttledMinutes', { minutes: Math.floor(wait / 60), seconds: wait % 60 })
-        : t('password.throttledSeconds', { seconds: wait })
+        ? t('settingsSave.password.throttledMinutes', { minutes: Math.floor(wait / 60), seconds: wait % 60 })
+        : t('settingsSave.password.throttledSeconds', { seconds: wait })
       : refusal?.kind === 'failed'
-        ? t('password.failed', { reason: reasonOf(refusal.error, t, reason) })
+        ? t('settingsSave.password.failed', { reason: reasonOf(refusal.error, t, reason) })
         : null
 
   return (
     <form onSubmit={submit} className="space-y-5" noValidate>
-      <Field label={t('password.label')} error={refusal?.kind === 'wrongPassword' ? t('password.wrong') : null}>
+      <Field label={t('settingsSave.password.label')} error={refusal?.kind === 'wrongPassword' ? t('settingsSave.password.wrong') : null}>
         <PasswordInput
           ref={field}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           autoComplete="current-password"
-          showLabel={t('password.show')}
-          hideLabel={t('password.hide')}
+          showLabel={t('settingsSave.password.show')}
+          hideLabel={t('settingsSave.password.hide')}
           disabled={pending || wait > 0}
         />
       </Field>
@@ -129,11 +129,11 @@ function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttl
       )}
       <DialogFooter className="gap-2 sm:gap-2">
         <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
-          {t('password.cancel')}
+          {t('settingsSave.password.cancel')}
         </Button>
         <Button type="submit" disabled={pending || wait > 0 || !password || !ready}>
           {pending && <LoaderCircle aria-hidden className="animate-spin" />}
-          {pending ? t('password.saving') : t('password.confirm')}
+          {pending ? t('settingsSave.password.saving') : t('settingsSave.password.confirm')}
         </Button>
       </DialogFooter>
     </form>

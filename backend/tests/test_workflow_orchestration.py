@@ -1,11 +1,14 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
+from support.fakes import RecordingLogger
 from support.harness import (
     FRESH,
     MARKET_CLOSED,
     MARKET_OPEN,
     STALE,
+    TREND_STRATEGY,
     CliHarness,
     build_harness,
     falling_history,
@@ -14,8 +17,10 @@ from support.harness import (
 )
 from support.settings import sinopac_setup
 
+from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.types.enums import (
     AiAnalysisFocus,
     ExecutionProvider,
@@ -25,9 +30,11 @@ from a_domain.types.enums import (
     SignalSource,
     TradeAction,
     WatchlistType,
+    Workflow,
 )
 from a_domain.types.ids import new_run_id
 from b_application.config.app_config import AppConfig
+from b_application.use_cases.process.technical_filter import TechnicalFilter
 
 
 def stock_ids(stocks: list[Stock]) -> list[str]:
@@ -223,6 +230,29 @@ async def test_intraday_analyses_unblocked_candidates_with_history_and_decides_o
     assert stock_ids(status.survivors) == ["2603", "1101"], "the held stock that failed still gets its exit decided"
     assert sorted(harness.ai.analysed_stock_ids) == ["1101", "2603"], "a held stock that fails the strategy, not one without history"
     assert sorted(signal.stock_id for signal in harness.journal.signals) == ["1101", "2330", "2603"]
+
+
+def test_a_stock_the_strategy_cannot_read_fails_alone_and_every_other_stock_keeps_its_report() -> None:
+    """Intraday keeps its held stocks for their exit, so one unreadable history must not put every position at score 0."""
+    readable = [Stock(stock_id="2330", ohlcv=rising_history(100.0)), Stock(stock_id="2454", ohlcv=falling_history(100.0))]
+    bars = rising_history(100.0)
+    naive_first_bar = replace(bars[0], ts=bars[0].ts.replace(tzinfo=None))
+    unreadable = Stock(stock_id="1101", ohlcv=[naive_first_bar, *bars[1:]])
+    stats = SystemStats(workflow=Workflow.INTRADAY, execution_provider=ExecutionProvider.MOCK, start_time=MARKET_OPEN)
+    logger = RecordingLogger()
+    alone = TREND_STRATEGY.apply(readable)
+
+    survivors = TechnicalFilter(logger).execute(
+        [readable[0], unreadable, readable[1]], TREND_STRATEGY, stats, keep=[unreadable, readable[1]]
+    )
+
+    assert [report.passed for report in alone] == [True, False]
+    assert [stock.technical_report for stock in readable] == alone
+    assert unreadable.technical_report == TechnicalReport(score=0, hard_failures=["Technical indicators unavailable"])
+    assert stock_ids(survivors) == ["2330", "1101", "2454"]
+    assert stats.passed_technical == 1
+    assert [message for level, message in logger.records if level == "error"] == stats.errors
+    assert stats.errors == ["Failed to process market data for 1101: can't compare offset-naive and offset-aware datetimes"]
 
 
 @pytest.mark.asyncio

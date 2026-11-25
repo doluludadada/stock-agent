@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { usePageTitle } from '@/shared/lib/page-title'
+import { useStrategyLabels } from '@/shared/lib/strategy-labels'
 import { paths } from '@/shared/config/paths'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -22,7 +23,6 @@ import { blankRule } from '../model/edit'
 import type { NodeId, Scoring, Strategy } from '../model/types'
 import { errorsOf, issuesByOwner, issuesByPath, requiredBars } from '../model/validate'
 import { RuleSummaryList } from '../library/RuleSummaryList'
-import { useStrategyLabels } from '../use-formula-text'
 import { FieldError, NumberField } from './fields'
 import { RuleCard, type EditorContext } from './RuleCard'
 import { draftIds, resolveDraftSource, useStrategyDraft, type BuilderMode, type DraftSource } from './use-strategy-draft'
@@ -272,7 +272,7 @@ function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: 
   const { t } = useTranslation('builder')
   const [scoringOpen, setScoringOpen] = useState(false)
   const nameIssue = issue('name')
-  const keys: (keyof Scoring)[] = ['baseScore', 'blockFailurePenalty', 'failureScoreReduction', 'passScoreIncrease']
+  const keys: (keyof Scoring)[] = ['base_score', 'block_failure_penalty', 'failure_score_reduction', 'pass_score_increase']
   const title = strategy.name.trim() || t('untitled')
   usePageTitle(title)
   return (
@@ -304,7 +304,7 @@ function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: 
           aria-controls="strategy-scoring"
         >
           <SlidersHorizontal aria-hidden />
-          {t('scoring.summary', { base: strategy.scoring.baseScore })}
+          {t('scoring.summary', { base: strategy.scoring.base_score })}
           <ChevronDown aria-hidden className={cn('transition-transform', scoringOpen && 'rotate-180')} />
         </Button>
       </div>

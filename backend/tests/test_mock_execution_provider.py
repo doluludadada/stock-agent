@@ -40,14 +40,7 @@ async def open_broker(
     return db, broker
 
 
-def order(
-    action: TradeAction,
-    quantity: int,
-    price: float,
-    time_in_force: TimeInForce = TimeInForce.IOC,
-    stock_id: str = "2330",
-    limit: float | None = None,
-) -> Order:
+def order(action: TradeAction, quantity: int, price: float, stock_id: str = "2330", limit: float | None = None) -> Order:
     """An order decided at `price`, limited at `limit`, the price itself unless a test moves it."""
     return Order(
         run_id=new_run_id(),
@@ -58,7 +51,7 @@ def order(
         quantity=quantity,
         limit_price=limit or price,
         price_at_signal=price,
-        time_in_force=time_in_force,
+        time_in_force=TimeInForce.IOC,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -156,35 +149,11 @@ async def test_a_bond_etf_sell_pays_no_tax_until_the_configured_exemption_ends(t
 async def test_ioc_fills_what_the_market_can_take_and_cancels_the_rest(tmp_path) -> None:
     db, broker = await open_broker(tmp_path, max_fill_quantity=400)
 
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.IOC), no_refusal, asyncio.Event())
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal, asyncio.Event())
 
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.CANCELLED, 400, 57)
     assert await cash(broker) == 1_000_000 - 40_057
     assert await holdings(broker) == [("2330", 400, pytest.approx(100.1425))]
-    await db.close()
-
-
-@pytest.mark.parametrize(
-    ("max_fill_quantity", "status", "filled"), [(400, OrderStatus.CANCELLED, 0), (None, OrderStatus.FILLED, 1000)]
-)
-async def test_fok_fills_everything_or_nothing(tmp_path, max_fill_quantity: int | None, status: OrderStatus, filled: int) -> None:
-    db, broker = await open_broker(tmp_path, max_fill_quantity=max_fill_quantity)
-
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.FOK), no_refusal, asyncio.Event())
-
-    assert (placed.status, placed.filled_quantity) == (status, filled)
-    assert sum(quantity for _, quantity, _ in await holdings(broker)) == filled
-    await db.close()
-
-
-async def test_rod_is_rejected_because_nothing_could_fill_its_working_remainder(tmp_path) -> None:
-    db, broker = await open_broker(tmp_path)
-
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.ROD), no_refusal, asyncio.Event())
-
-    assert placed.status == OrderStatus.REJECTED
-    assert placed.reason is not None and placed.reason.startswith("UNSUPPORTED_TIME_IN_FORCE")
-    assert await cash(broker) == 1_000_000
     await db.close()
 
 

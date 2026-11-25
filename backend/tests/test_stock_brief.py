@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from support.databases import open_database
 from support.harness import MARKET_OPEN, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness, daily_history, harness_config
-from support.settings import APPSETTING
+from support.settings import APPSETTING, load_yaml
 from support.web import serve
 from test_ranking_rule import revenue
 
@@ -36,7 +36,6 @@ from a_domain.types.enums import (
 )
 from a_domain.types.errors import AiAllowanceSpentError, IllegalBriefTransition
 from b_application.config.app_config import AppConfig
-from b_application.config.settings_loader import load_yaml
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.stock_brief_dto import CompanyCardDTO, StockBriefDTO
 from c_infrastructure.database.repositories.stock_brief_repository import SqlStockBriefRepository

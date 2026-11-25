@@ -85,37 +85,35 @@ class ApiConfig(BaseSettings):
 class FeaturesConfig(BaseModel):
     """
     Who the site shows each of its features to, from the `features` section of config/appsetting.yaml: one setting per
-    Feature, named by the member's value. A file that names none of them, such as a deployment's older copy, runs on
-    these defaults, which suit a live site: research for every user, and analysis runs, strategies and trading for
-    administrators.
+    Feature, named by the member's value, and a file that leaves one out is refused.
     """
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    market_overview: FeatureVisibility = FeatureVisibility.EVERYONE
-    ranking: FeatureVisibility = FeatureVisibility.EVERYONE
-    stock_pages: FeatureVisibility = FeatureVisibility.EVERYONE
-    watchlist: FeatureVisibility = FeatureVisibility.EVERYONE
-    valuation: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    full_cycle: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    specific_stock: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    buzz: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    intraday: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    strategy_library: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    strategy_designer: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    strategy_backtest: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    mock_account: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
-    sinopac_account: FeatureVisibility = FeatureVisibility.ADMINISTRATORS
+    market_overview: FeatureVisibility
+    ranking: FeatureVisibility
+    stock_pages: FeatureVisibility
+    watchlist: FeatureVisibility
+    valuation: FeatureVisibility
+    full_cycle: FeatureVisibility
+    specific_stock: FeatureVisibility
+    buzz: FeatureVisibility
+    intraday: FeatureVisibility
+    strategy_library: FeatureVisibility
+    strategy_designer: FeatureVisibility
+    strategy_backtest: FeatureVisibility
+    mock_account: FeatureVisibility
+    sinopac_account: FeatureVisibility
     """Reading the SinoPac account. It never orders, and only a user with USE_REAL_BROKER reads it."""
 
-    sinopac_ordering: FeatureVisibility = FeatureVisibility.OFF
+    sinopac_ordering: FeatureVisibility
     """
     Ordering on SinoPac. Off, no order reaches SinoPac, whatever the environment and whoever the user is. On, it is
     never more than the gates of a real broker allow: USE_REAL_BROKER and the send-time checks still decide.
     """
 
-    holdings: FeatureVisibility = FeatureVisibility.EVERYONE
-    world: FeatureVisibility = FeatureVisibility.EVERYONE
+    holdings: FeatureVisibility
+    world: FeatureVisibility
     """The world page and the home page's world block. Off, the site also reads no world feed and writes no world brief."""
 
     def visibility(self, feature: Feature) -> FeatureVisibility:

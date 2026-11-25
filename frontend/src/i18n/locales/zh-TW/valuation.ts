@@ -52,7 +52,7 @@ const valuation: DictionaryShape<typeof en> = {
   industryMedian: '{{industry}}本益比中位數',
   scenario: { conservative: '保守 {{pe}} 倍', base: '基準 {{pe}} 倍', optimistic: '樂觀 {{pe}} 倍' },
   noFairPrice: '無法計算合理價：{{reason}}。',
-  epsKind: { single_quarter: '單季', cumulative: '累計', annual: '年度', trailing_twelve_months: '近四季' },
+  epsKind: { cumulative: '累計', trailing_twelve_months: '近四季' },
   epsUnavailable: {
     not_loaded: '尚未載入 EPS',
     not_reported: '沒有申報 EPS（例如 ETF）',

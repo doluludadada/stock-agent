@@ -133,7 +133,6 @@ def test_the_eps_change_compares_the_year_to_date_with_the_same_quarter_a_year_b
 
     assert [result.eps_year_over_year for result in trend.quarters] == [None, None, pytest.approx(0.2), 0.25]
     assert trend.eps_growing_quarters == 2
-    assert trend.filed_eps_fetched_at == FETCHED
 
 
 def test_a_loss_a_year_before_gives_no_eps_change() -> None:
@@ -148,7 +147,6 @@ def test_the_archives_eps_wins_over_a_mops_page_of_the_same_quarter_and_other_co
     trend = EarningsTrendRule().apply("1215", [archived], [page(2026, 3, 9.99, "1215"), page(2026, 2, 3.0, "9999")])
 
     assert [(str(result.quarter), result.eps_year_to_date) for result in trend.quarters] == [("2026Q3", 5.47)]
-    assert trend.filed_eps_fetched_at is None
 
 
 def test_margins_and_the_debt_ratio_come_from_the_statements_and_are_unknown_where_the_format_reports_none() -> None:

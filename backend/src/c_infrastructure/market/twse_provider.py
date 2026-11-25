@@ -16,10 +16,10 @@ from a_domain.ports.market.daily_close_archive import ExchangeNews, FinancialRep
 from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.types.enums import ContentType, EpsBasis, EpsKind, FinancialStatement, IndustryFormat, InformationSource, MarketType
+from a_domain.types.enums import ContentType, EpsKind, FinancialStatement, IndustryFormat, InformationSource, MarketType
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig
-from b_application.config.sources_config import ExchangeSources
+from b_application.config.sources_config import ExchangeSources, MonthlyRevenueFeed
 from c_infrastructure.market.exchange_text import (
     ROC_YEAR_OFFSET,
     parse_change,
@@ -201,43 +201,15 @@ class TaiwanStockProvider(ITaiwanStockProvider):
     async def fetch_monthly_revenues(self) -> list[MonthlyRevenue]:
         reports = await read_reports(
             {market: feed.url for market, feed in self._exchange.monthly_revenue.items()},
-            lambda rows, market: [revenue for row in rows if (revenue := self.parse_monthly_revenue(row, market)) is not None],
+            lambda rows, market: [
+                revenue
+                for row in rows
+                if (revenue := parse_monthly_revenue(row, market, self._exchange.monthly_revenue[market])) is not None
+            ],
             self._timeout_seconds,
             self._logger,
         )
         return [revenue for revenues in reports.values() for revenue in revenues]
-
-    @override
-    def parse_monthly_revenue(self, row: dict[str, Any], market: MarketType) -> MonthlyRevenue | None:
-        feed = self._exchange.monthly_revenue[market]
-
-        if not (stock_id := served_field(row, [feed.stock_id])):
-            return None
-
-        year_month = "".join(part.zfill(2) for part in served_field(row, [feed.year_month]).split("/"))
-        served = "".join(part.zfill(2) for part in served_field(row, [feed.served_date]).split("/"))
-
-        try:
-            return MonthlyRevenue(
-                stock_id=stock_id,
-                year=int(year_month[:-2]) + ROC_YEAR_OFFSET,
-                month=int(year_month[-2:]),
-                market=market,
-                served_date=parse_roc_date(served),
-                company_name=served_field(row, [feed.company_name]),
-                industry=served_field(row, [feed.industry]),
-                revenue=parse_number(served_field(row, [feed.revenue])),
-                previous_month_revenue=parse_number(served_field(row, [feed.previous_month_revenue])),
-                last_year_revenue=parse_number(served_field(row, [feed.last_year_revenue])),
-                month_over_month_percent=parse_number(served_field(row, [feed.month_over_month_percent])),
-                year_over_year_percent=parse_number(served_field(row, [feed.year_over_year_percent])),
-                cumulative_revenue=parse_number(served_field(row, [feed.cumulative_revenue])),
-                last_year_cumulative_revenue=parse_number(served_field(row, [feed.last_year_cumulative_revenue])),
-                cumulative_year_over_year_percent=parse_number(served_field(row, [feed.cumulative_year_over_year_percent])),
-                note=served_field(row, [feed.note]),
-            )
-        except ValueError:
-            return None
 
     @override
     async def fetch_exchange_news(self) -> list[ExchangeNews]:
@@ -266,28 +238,26 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 async def fetch_listings(
     exchange: ExchangeSources, clock: IMarketClock, timeout_seconds: float, logger: ILoggingProvider
 ) -> tuple[list[Stock], dict[str, Ohlcv]]:
-    """Both listings' stocks and their closes. A failed fetch is logged and yields neither."""
+    """
+    Both listings' stocks and their closes, or neither when a listing fails to load (fetch_reports logs it): the cache
+    keeps a list it got for hours, and one market's stocks alone would leave the other's out of every read until then.
+    """
+    urls = {MarketType.TWSE: exchange.twse_daily_quotes_url, MarketType.TPEX: exchange.tpex_daily_quotes_url}
+    reports = await fetch_reports(urls, timeout_seconds, logger)
     stocks: list[Stock] = []
     closes: dict[str, Ohlcv] = {}
 
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        try:
-            for market, url in ((MarketType.TWSE, exchange.twse_daily_quotes_url), (MarketType.TPEX, exchange.tpex_daily_quotes_url)):
-                logger.debug(f"Fetching {market} stocks...")
-                response = await client.get(url)
-                response.raise_for_status()
-                rows = response.json()
-                listed, listed_closes = parse_listing(rows, market, clock)
-                log_unread(url, rows, len(listed_closes), logger)
-                stocks.extend(listed)
-                closes.update(listed_closes)
+    if len(reports) < len(urls):
+        return stocks, closes
 
-            logger.success(f"Successfully loaded {len(stocks)} stocks and {len(closes)} daily closes from API.")
-            return stocks, closes
+    for market, rows in reports.items():
+        listed, listed_closes = parse_listing(rows, market, clock)
+        log_unread(urls[market], rows, len(listed_closes), logger)
+        stocks.extend(listed)
+        closes.update(listed_closes)
 
-        except Exception as error:
-            logger.error(f"Failed to fetch stock list: {error}")
-            return [], {}
+    logger.success(f"Successfully loaded {len(stocks)} stocks and {len(closes)} daily closes from API.")
+    return stocks, closes
 
 
 def parse_listing(rows: list[dict[str, Any]], market: MarketType, clock: IMarketClock) -> tuple[list[Stock], dict[str, Ohlcv]]:
@@ -506,12 +476,7 @@ def parse_quarter_eps(
 
         if stock_id and (value := parse_number(str(row.get(feed.eps, "")))) is not None:
             filed[stock_id] = Eps(
-                value=value,
-                kind=EpsKind.CUMULATIVE,
-                period_end=quarter,
-                basis=EpsBasis.ACTUAL,
-                source=InformationSource.TWSE_MOPS,
-                fetched_at=fetched_at,
+                value=value, kind=EpsKind.CUMULATIVE, period_end=quarter, source=InformationSource.TWSE_MOPS, fetched_at=fetched_at
             )
 
     return filed
@@ -570,6 +535,40 @@ def parse_financial_report(
         served_date=served_date,
         items={name: str(value) for name, value in row.items() if name not in feeds.identity},
     )
+
+
+def parse_monthly_revenue(row: dict[str, Any], market: MarketType, feed: MonthlyRevenueFeed) -> MonthlyRevenue | None:
+    """
+    One company's revenue of the month its row names ('11509', and '115/9' in MOPS's summary, are 2026-09), or None
+    when the row names no company or no valid month or served date ('1151109', or '115/11/09' in MOPS's summary).
+    """
+    if not (stock_id := served_field(row, [feed.stock_id])):
+        return None
+
+    year_month = served_field(row, [feed.year_month])
+
+    try:
+        first_day = parse_roc_date(f"{year_month}/1" if "/" in year_month else f"{year_month}01")
+        return MonthlyRevenue(
+            stock_id=stock_id,
+            year=first_day.year,
+            month=first_day.month,
+            market=market,
+            served_date=parse_roc_date(served_field(row, [feed.served_date])),
+            company_name=served_field(row, [feed.company_name]),
+            industry=served_field(row, [feed.industry]),
+            revenue=parse_number(served_field(row, [feed.revenue])),
+            previous_month_revenue=parse_number(served_field(row, [feed.previous_month_revenue])),
+            last_year_revenue=parse_number(served_field(row, [feed.last_year_revenue])),
+            month_over_month_percent=parse_number(served_field(row, [feed.month_over_month_percent])),
+            year_over_year_percent=parse_number(served_field(row, [feed.year_over_year_percent])),
+            cumulative_revenue=parse_number(served_field(row, [feed.cumulative_revenue])),
+            last_year_cumulative_revenue=parse_number(served_field(row, [feed.last_year_cumulative_revenue])),
+            cumulative_year_over_year_percent=parse_number(served_field(row, [feed.cumulative_year_over_year_percent])),
+            note=served_field(row, [feed.note]),
+        )
+    except ValueError:
+        return None
 
 
 def served_field(row: dict[str, Any], names: list[str]) -> str:

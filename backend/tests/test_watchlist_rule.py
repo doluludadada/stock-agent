@@ -221,7 +221,7 @@ async def test_the_cli_reports_newly_added_and_already_present_manual_stocks(cap
 def test_the_watchlist_config_counts_sessions_and_refuses_the_old_hours_key() -> None:
     root = get_project_root()
     text = (root / "config" / "appsetting.yaml").read_text(encoding="utf-8")
-    old_key = text.replace("  automatic_expiry_sessions: 1", "  automatic_expiry_hours: 24", 1)
+    old_key = f"{text}watchlist:\n  automatic_expiry_hours: 24\n"
 
     assert load_settings(root).watchlist.automatic_expiry_sessions == 1
     with pytest.raises(InvalidSettingsError) as refused:

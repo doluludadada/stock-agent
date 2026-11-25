@@ -14,7 +14,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.daily_history_source import IDailyHistorySource
-from a_domain.ports.market.price_provider import IRealtimeQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.market.listing import HistoryAdjustmentRule
@@ -37,7 +36,6 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     def __init__(
         self,
-        quotes: IRealtimeQuoteProvider,
         source: IDailyHistorySource,
         archive: IDailyCloseArchive,
         db: DatabaseConnector,
@@ -47,7 +45,6 @@ class CachedPriceProvider(ICachedPriceProvider):
         logger: ILoggingProvider,
         write_lock: asyncio.Lock,
     ) -> None:
-        self._quotes = quotes
         self._reference_months = reference_months
         self._source = source
         self._archive = archive
@@ -62,10 +59,6 @@ class CachedPriceProvider(ICachedPriceProvider):
         self._asked: dict[str, datetime] = {}
         self._failed_at: datetime | None = None
         self._adjustment = HistoryAdjustmentRule()
-
-    @override
-    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        return await self._quotes.fetch_realtime_bars(stocks)
 
     @override
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:

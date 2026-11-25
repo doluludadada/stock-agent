@@ -1,13 +1,14 @@
 from collections.abc import Iterator
-from math import isfinite
+from functools import reduce
 from typing import Annotated, Literal, Self
 
-from pydantic import ConfigDict, Field, FiniteFloat, Strict, model_validator
+import numpy as np
+from pydantic import ConfigDict, Field, Strict, model_validator
 from pydantic.dataclasses import dataclass
 
-from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.rules.technical.calculation.calculator import Outputs, finite
 from a_domain.types.enums import ArithmeticOperator, ComparisonOperator, FormulaNode, GroupOperator, IndicatorOutput, MarketField
-from a_domain.types.values import BarsAgo, FormulaId
+from a_domain.types.values import BarsAgo, Flags, Floats, FormulaId, Integers
 
 
 @dataclass(frozen=True, kw_only=True, config=ConfigDict(extra="forbid"))
@@ -101,18 +102,6 @@ class ConditionGroup:
 type Condition = Annotated[Comparison | ConditionGroup, Field(discriminator="type")]
 
 
-@dataclass(frozen=True)
-class FormulaInputs:
-    """
-    What a formula reads for one stock: its completed daily bars, oldest first; its latest price; and each indicator
-    output the formula reads, keyed by indicator id and bars ago. An output the history could not give is absent.
-    """
-
-    bars: tuple[Ohlcv, ...]
-    latest_price: float | None
-    indicators: dict[tuple[FormulaId, int], dict[IndicatorOutput, FiniteFloat]]
-
-
 def references(node: Condition | NumericExpression, shift: int = 0) -> Iterator[tuple[DataReference, int]]:
     """
     Every data reference in the formula, with how many more bars back it is read than its own bars_ago: a crossing
@@ -135,97 +124,82 @@ def references(node: Condition | NumericExpression, shift: int = 0) -> Iterator[
             return
 
 
-def condition_holds(condition: Condition, inputs: FormulaInputs) -> bool | None:
+@dataclass(frozen=True, config=ConfigDict(arbitrary_types_allowed=True))
+class WindowInputs:
     """
-    Whether the condition holds, or None when it reads an unavailable input. A group evaluates every condition it
-    holds before it answers, so one condition's result never hides another condition's missing input.
+    What the formulas read for a batch of windows, each a stock's daily bars up to one session: the stacked bars the
+    batch reaches, oldest first; the index there of each window's latest bar; each window's latest price; and each
+    indicator output the formulas read, keyed by indicator id and bars ago. NaN stands for an input the window cannot give.
+    """
+
+    bars: dict[MarketField, Floats]
+    ends: Integers
+    latest_price: Floats
+    indicators: dict[tuple[FormulaId, int], Outputs]
+
+
+def condition_holds(condition: Condition, inputs: WindowInputs) -> tuple[Flags, Flags]:
+    """
+    Where the condition holds, and where every input it reads is available. A group is available only where every
+    condition it holds is, so one condition's result never hides another condition's missing input.
     """
     match condition:
         case ConditionGroup(operator=operator, conditions=conditions):
             results = [condition_holds(part, inputs) for part in conditions]
-
-            if None in results:
-                return None
-
-            return all(results) if operator == GroupOperator.ALL else any(results)
+            combine = np.logical_and if operator == GroupOperator.ALL else np.logical_or
+            return reduce(combine, (holds for holds, _ in results)), reduce(np.logical_and, (available for _, available in results))
         case Comparison():
             return comparison_holds(condition, inputs)
 
 
-def comparison_holds(comparison: Comparison, inputs: FormulaInputs) -> bool | None:
+def comparison_holds(comparison: Comparison, inputs: WindowInputs) -> tuple[Flags, Flags]:
     left, right = numeric_value(comparison.left, inputs), numeric_value(comparison.right, inputs)
-
-    if left is None or right is None:
-        return None
+    available = ~np.isnan(left) & ~np.isnan(right)
 
     match comparison.operator:
         case ComparisonOperator.GT:
-            return left > right
+            return left > right, available
         case ComparisonOperator.GTE:
-            return left >= right
+            return left >= right, available
         case ComparisonOperator.LT:
-            return left < right
+            return left < right, available
         case ComparisonOperator.LTE:
-            return left <= right
+            return left <= right, available
         case ComparisonOperator.EQ:
-            return left == right
+            return left == right, available
         case ComparisonOperator.NE:
-            return left != right
+            return left != right, available
         case _:
             return crossing_holds(comparison, inputs, left, right)
 
 
-def crossing_holds(comparison: Comparison, inputs: FormulaInputs, left: float, right: float) -> bool | None:
+def crossing_holds(comparison: Comparison, inputs: WindowInputs, left: Floats, right: Floats) -> tuple[Flags, Flags]:
     earlier_left, earlier_right = numeric_value(comparison.left, inputs, 1), numeric_value(comparison.right, inputs, 1)
-
-    if earlier_left is None or earlier_right is None:
-        return None
+    available = ~np.isnan(left) & ~np.isnan(right) & ~np.isnan(earlier_left) & ~np.isnan(earlier_right)
 
     if comparison.operator == ComparisonOperator.CROSSES_ABOVE:
-        return earlier_left <= earlier_right and left > right
+        return (earlier_left <= earlier_right) & (left > right), available
 
-    return earlier_left >= earlier_right and left < right
+    return (earlier_left >= earlier_right) & (left < right), available
 
 
-def numeric_value(expression: NumericExpression, inputs: FormulaInputs, shift: int = 0) -> float | None:
-    """The expression `shift` daily bars back, or None when an input is unavailable or the result is not finite."""
+def numeric_value(expression: NumericExpression, inputs: WindowInputs, shift: int = 0) -> Floats:
+    """The expression `shift` daily bars back in each window, NaN where an input is unavailable or the result is not finite."""
     match expression:
         case MarketValue(field=field, bars_ago=bars_ago):
-            return finite(market_value(inputs.bars[-1 - bars_ago - shift], field))
+            return finite(inputs.bars[field][inputs.ends - bars_ago - shift])
         case LatestPrice():
             return finite(inputs.latest_price)
         case IndicatorValue(indicator_id=indicator_id, output=output, bars_ago=bars_ago):
-            return inputs.indicators.get((indicator_id, bars_ago + shift), {}).get(output)
+            return inputs.indicators[(indicator_id, bars_ago + shift)][output]
         case Arithmetic(operator=operator, left=left, right=right):
             return arithmetic(operator, numeric_value(left, inputs, shift), numeric_value(right, inputs, shift))
         case _:
-            return expression
+            return np.full(len(inputs.ends), float(expression))
 
 
-def market_value(bar: Ohlcv, field: MarketField) -> float:
-    match field:
-        case MarketField.OPEN:
-            return bar.open
-        case MarketField.HIGH:
-            return bar.high
-        case MarketField.LOW:
-            return bar.low
-        case MarketField.CLOSE:
-            return bar.close
-        case MarketField.VOLUME:
-            return float(bar.volume)
-
-
-def finite(value: float | None) -> float | None:
-    """A price or volume that is not a finite number, such as a NaN from a bad data row, is unavailable."""
-    return value if value is not None and isfinite(value) else None
-
-
-def arithmetic(operator: ArithmeticOperator, left: float | None, right: float | None) -> float | None:
-    """None for an unavailable side, a division by zero or a result too large to be finite: none of them is a zero."""
-    if left is None or right is None:
-        return None
-
+def arithmetic(operator: ArithmeticOperator, left: Floats, right: Floats) -> Floats:
+    """NaN for an unavailable side, a division by zero or a result too large to be finite: none of them is a zero."""
     match operator:
         case ArithmeticOperator.ADD:
             result = left + right
@@ -234,6 +208,6 @@ def arithmetic(operator: ArithmeticOperator, left: float | None, right: float | 
         case ArithmeticOperator.MULTIPLY:
             result = left * right
         case ArithmeticOperator.DIVIDE:
-            result = left / right if right != 0 else None
+            result = np.where(right != 0, left / right, np.nan)
 
     return finite(result)

@@ -75,6 +75,24 @@ describe('leaving the designer with unsaved edits', () => {
     expect(router.state.location.search).toBe('')
   })
 
+  it('lets the page go right after a save, before it renders again, and asks again on the next edit', async () => {
+    vi.stubGlobal('fetch', fakeServer().fetch)
+    session.signIn(TEST_USER)
+    const { draft, router } = openDesigner('saved', '/strategies/new?builtin=balanced')
+    await waitFor(() => expect(draft.current?.revision).toBe(1))
+    act(() => draft.current!.edit({ type: 'setName', name: 'Mine' }))
+
+    await act(async () => {
+      expect(await draft.current!.save()).toMatchObject({ ok: true })
+      await router.navigate('/strategies/new')
+    })
+    expect(router.state.location.search, 'the save’s own navigation, as to the edit page').toBe('')
+
+    act(() => draft.current!.edit({ type: 'setName', name: 'Mine again' }))
+    await act(() => router.navigate('/strategies/new?builtin=balanced'))
+    expect(draft.current!.blocker.state).toBe('blocked')
+  })
+
   it('lets a navigation through when nothing was edited', async () => {
     vi.stubGlobal('fetch', fakeServer().fetch)
     session.signIn(TEST_USER)

@@ -1,7 +1,8 @@
 import json
 import re
 from calendar import monthrange
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from datetime import date, timedelta
 from itertools import pairwise
 
@@ -104,18 +105,25 @@ class BriefSearchRule:
         ]
 
 
-def keyed_facts(found: Sequence[tuple[BriefSourceKind, date, str, str | None, str | None]]) -> list[BriefFact]:
-    return [
-        BriefFact(source=BriefSource(key=f"S{number}", kind=kind, dated=dated_on, title=title, url=url), text=text)
-        for number, (kind, dated_on, text, title, url) in enumerate(found, start=1)
-    ]
+def held_fact(kind: BriefSourceKind, dated: date, text: str, title: str | None = None, url: str | None = None) -> BriefFact:
+    """A fact as a context rule finds it, under the key S0 until keyed_facts keys it in its context's order."""
+    return BriefFact(source=BriefSource(key="S0", kind=kind, dated=dated, title=title, url=url), text=text)
+
+
+def keyed_facts(found: Iterable[BriefFact]) -> list[BriefFact]:
+    """The facts in their order, keyed as the AI cites them: S1, S2 and so on."""
+    return [replace(fact, source=replace(fact.source, key=f"S{number}")) for number, fact in enumerate(found, start=1)]
+
+
+def listing_line(stock: Stock, name: str | None) -> str:
+    """The stock as the exchange lists it: its id, `name`, and its market."""
+    return f"{stock.stock_id} {name or 'name not held'}, listed on {stock.market.value}"
 
 
 def company_line(stock: Stock, revenue: RevenueTrend) -> str:
     year = [month.revenue for month in revenue.months[-12:] if month.revenue is not None]
     scale = f"revenue of the latest {len(year)} held months {sum(year):,.0f} thousand TWD" if year else "no revenue held"
-    listed = f"{stock.stock_id} {stock.name or 'name not held'}, listed on {stock.market.value}"
-    return f"{listed}, industry in the exchange's listing: {stock.industry or 'not held'}; {scale}"
+    return f"{listing_line(stock, stock.name)}, industry in the exchange's listing: {stock.industry or 'not held'}; {scale}"
 
 
 def written_card(cards: Sequence[StockBrief | None]) -> StockBrief | None:
@@ -123,18 +131,16 @@ def written_card(cards: Sequence[StockBrief | None]) -> StockBrief | None:
     return next((card for card in cards if card is not None and card.status == BriefStatus.WRITTEN and card.company), None)
 
 
-def company_fact(
-    stock: Stock, revenue: RevenueTrend, card: StockBrief | None, day: date
-) -> tuple[BriefSourceKind, date, str, None, None]:
+def company_fact(stock: Stock, revenue: RevenueTrend, card: StockBrief | None, day: date) -> BriefFact:
     """What the company is, in one fact: its card's sentences where it has a card, else its listing and revenue scale."""
     if card is None:
-        return (BriefSourceKind.COMPANY, day, company_line(stock, revenue), None, None)
+        return held_fact(BriefSourceKind.COMPANY, day, company_line(stock, revenue))
 
     said = " ".join(sentence.text for sentence in card.company)
-    return (BriefSourceKind.COMPANY, card.day, f"{stock.stock_id} {stock.name or ''}: {said}", None, None)
+    return held_fact(BriefSourceKind.COMPANY, card.day, f"{stock.stock_id} {stock.name or ''}: {said}")
 
 
-def price_facts(window: Sequence[Ohlcv], largest_moves: PositiveInt) -> list[tuple[BriefSourceKind, date, str, None, None]]:
+def price_facts(window: Sequence[Ohlcv], largest_moves: PositiveInt) -> list[BriefFact]:
     change = close_change(window)
 
     if change is None:
@@ -148,10 +154,10 @@ def price_facts(window: Sequence[Ohlcv], largest_moves: PositiveInt) -> list[tup
         f"close {first.close:,.2f} on {first.ts.date().isoformat()} to {last.close:,.2f} on {last.ts.date().isoformat()}: "
         f"{change:+.1%} over {len(window)} sessions; largest daily moves: {days or 'none'}"
     )
-    return [(BriefSourceKind.PRICE, last.ts.date(), text, None, None)]
+    return [held_fact(BriefSourceKind.PRICE, last.ts.date(), text)]
 
 
-def revenue_fact(month: RevenueMonth, trend: RevenueTrend) -> tuple[BriefSourceKind, date, str, None, None]:
+def revenue_fact(month: RevenueMonth, trend: RevenueTrend) -> BriefFact:
     figures = [
         None if month.revenue is None else f"{month.revenue:,.0f} thousand TWD",
         None if month.year_over_year is None else f"{month.year_over_year:+.1%} from a year before",
@@ -160,14 +166,14 @@ def revenue_fact(month: RevenueMonth, trend: RevenueTrend) -> tuple[BriefSourceK
         else f"mean of the latest {trend.short_months} months {month.acceleration:.2f} times that of the {trend.long_months}",
     ]
     said = ", ".join(figure for figure in figures if figure is not None) or "no figure served"
-    return (BriefSourceKind.REVENUE, month.served_date, f"revenue of {month.year}-{month.month:02d}: {said}", None, None)
+    return held_fact(BriefSourceKind.REVENUE, month.served_date, f"revenue of {month.year}-{month.month:02d}: {said}")
 
 
 def quarters_with_eps(analysis: StockAnalysis, limit: PositiveInt) -> list[QuarterResult]:
     return [result for result in analysis.earnings.quarters if result.eps_year_to_date is not None][-limit:]
 
 
-def quarter_fact(result: QuarterResult) -> tuple[BriefSourceKind, date, str, None, None]:
+def quarter_fact(result: QuarterResult) -> BriefFact:
     quarter = result.quarter
     figures = [
         f"EPS of the year to its end {result.eps_year_to_date:.2f} TWD",
@@ -177,10 +183,10 @@ def quarter_fact(result: QuarterResult) -> tuple[BriefSourceKind, date, str, Non
         None if result.net_margin is None else f"net margin {result.net_margin:.1%}",
     ]
     ended = date(quarter.year, quarter.quarter * 3, monthrange(quarter.year, quarter.quarter * 3)[1])
-    return (BriefSourceKind.EARNINGS, ended, f"{quarter}: " + ", ".join(figure for figure in figures if figure), None, None)
+    return held_fact(BriefSourceKind.EARNINGS, ended, f"{quarter}: " + ", ".join(figure for figure in figures if figure))
 
 
-def standing_facts(standing: RankingStanding | None) -> list[tuple[BriefSourceKind, date, str, None, None]]:
+def standing_facts(standing: RankingStanding | None) -> list[BriefFact]:
     if standing is None or standing.place is None:
         return []
 
@@ -188,12 +194,12 @@ def standing_facts(standing: RankingStanding | None) -> list[tuple[BriefSourceKi
     held = f"{'inside' if standing.in_top else 'outside'} the top {standing.formula.top}"
     text = f"place {standing.place} of {standing.scored} stocks scored by {factors}, "
     text += "while the ranking holds cash" if standing.holds_cash else held
-    return [(BriefSourceKind.RANKING, standing.decided_on, text, None, None)]
+    return [held_fact(BriefSourceKind.RANKING, standing.decided_on, text)]
 
 
 def article_facts(
     articles: Sequence[Article], retrieved: Sequence[Article], first: date | None, limit: PositiveInt, article_text_length: PositiveInt
-) -> list[tuple[BriefSourceKind, date, str, str, str | None]]:
+) -> list[BriefFact]:
     dated = [article for article in retrieved or articles if first is None or article.published_at.date() >= first]
 
     if not retrieved:
@@ -201,16 +207,16 @@ def article_facts(
 
     newest_first = sorted(dated, key=lambda article: article.published_at, reverse=True)
     earlier = [article for article in retrieved if first is not None and article.published_at.date() < first]
-    once: dict[str, tuple[BriefSourceKind, date, str, str, str | None]] = {}
+    once: dict[str, BriefFact] = {}
 
     for article in (*newest_first, *earlier):
         fact = article_fact(article, article_text_length)
-        once.setdefault(fact[2], fact)
+        once.setdefault(fact.text, fact)
 
     return list(once.values())
 
 
-def article_fact(article: Article, article_text_length: PositiveInt) -> tuple[BriefSourceKind, date, str, str, str | None]:
+def article_fact(article: Article, article_text_length: PositiveInt) -> BriefFact:
     match article.source:
         case InformationSource.TWSE_MOPS:
             kind = BriefSourceKind.ANNOUNCEMENT
@@ -227,7 +233,7 @@ def article_fact(article: Article, article_text_length: PositiveInt) -> tuple[Br
 
     body = " ".join((article.open_text or "").split())[:article_text_length]
     title = " ".join(article.title.split())
-    return (kind, article.published_at.date(), f"{title} | {body}" if body and body != title else title, title, article.url)
+    return held_fact(kind, article.published_at.date(), f"{title} | {body}" if body and body != title else title, title, article.url)
 
 
 @dataclass(frozen=True, kw_only=True)

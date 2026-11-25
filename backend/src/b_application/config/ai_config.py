@@ -1,7 +1,7 @@
 from string import Formatter
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.ports.system.settings_files import SettingsProblem
@@ -50,7 +50,7 @@ class AiConfig(BaseSettings):
     """The site's default: the AI model of every run whose user chose none, LINE chat's and the signed-out pages'."""
 
     available_models: dict[AiProvider, str]
-    user_selectable: list[AiProvider] = Field(default_factory=list)
+    user_selectable: list[AiProvider]
     """The AI models a user may choose for their own runs on My settings, besides active_model. Empty offers only it."""
 
     system_model: AiProvider = AiProvider.CLAUDE
@@ -141,11 +141,7 @@ class AiConfig(BaseSettings):
 class BehaviorConfig(BaseModel):
     """
     System behaviour and toggles. The web search filters default to none; the rest comes from config/appsetting.yaml.
-    `retired` names the settings this section once had and no longer reads: a settings file that still sets one starts,
-    and the start names it (settings_notices).
     """
-
-    model_config = ConfigDict(json_schema_extra={"retired": ["x_search_allowed_handles", "x_search_excluded_handles"]})
 
     log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] = Field(
         json_schema_extra={"group": SettingGroup.SITE_ACCESS}

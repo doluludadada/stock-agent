@@ -1,6 +1,5 @@
 import asyncio
 import json
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import override
 from uuid import uuid4
@@ -13,6 +12,7 @@ from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
 from b_application.config.sources_config import NewsSources
+from c_infrastructure.feed.web_page import fetch_page
 
 
 class CnyesNewsProvider(INewsSource):
@@ -57,28 +57,6 @@ class CnyesNewsProvider(INewsSource):
 
         self._logger.warning(f"No Cnyes articles found for {stock_id}.")
         return []
-
-
-async def fetch_page(
-    client: httpx.AsyncClient, logger: ILoggingProvider, url: str, params: Mapping[str, str | int] | None = None
-) -> str | None:
-    """The text of a listing page or feed, or None when the site refused or could not be reached."""
-    try:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        return response.text
-    except httpx.HTTPStatusError as error:
-        status_code = error.response.status_code
-
-        if status_code >= 500:
-            logger.warning(f"Cnyes endpoint {url} unavailable (HTTP {status_code}); trying next source.")
-        else:
-            logger.error(f"Cnyes rejected request {url} (HTTP {status_code}): {error}")
-
-        return None
-    except httpx.RequestError as error:
-        logger.warning(f"Cnyes request {url} failed: {error}")
-        return None
 
 
 def parse_listing(stock_id: str, page: str, article_url: str, logger: ILoggingProvider) -> list[Article]:

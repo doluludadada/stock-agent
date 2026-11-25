@@ -7,7 +7,7 @@ import { initI18n } from '@/i18n'
 import { session, type Schemas, type User } from '@/shared/api'
 import { siteShowing } from '@/test/features'
 import { TEST_ADMIN } from '@/test/users'
-import { BrokerageRoute } from './router/routes/brokerage'
+import { BrokerageAccountPage } from './BrokerageAccountPage'
 
 const PASSWORD = 'correct horse battery'
 const HOLDER: User = { ...TEST_ADMIN, permissions: [...TEST_ADMIN.permissions, 'use_real_broker'] }
@@ -59,7 +59,7 @@ function open() {
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <BrokerageRoute />
+          <BrokerageAccountPage />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,

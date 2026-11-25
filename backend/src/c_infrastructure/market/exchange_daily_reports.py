@@ -12,7 +12,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.sources_config import DailyReportFeed, ExRightReferenceFeed, QuoteFields
-from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_change, parse_number
+from c_infrastructure.market.exchange_text import parse_change, parse_number, parse_optional_roc_date
 from c_infrastructure.market.twse_provider import STOCK_CODE_LENGTH
 from c_infrastructure.request_pace import RequestPace
 
@@ -100,7 +100,7 @@ class ExchangeDailyReports(IDailyHistorySource):
         references: dict[tuple[str, date], float] = {}
 
         for row in table_rows(answer, [report.date, report.stock_id, report.reference]):
-            session = session_date("/".join(re.findall(r"\d+", row[report.date])))
+            session = parse_optional_roc_date("/".join(re.findall(r"\d+", row[report.date])))
             price = parse_number(row[report.reference])
 
             if session is not None and price is not None and price > 0 and len(row[report.stock_id]) == STOCK_CODE_LENGTH:
@@ -186,14 +186,14 @@ def index_month(prices: Any, volumes: Any, feed: DailyReportFeed, board_lot_shar
     earlier = volume_fields.earlier_volume if volume_fields.volume not in served else None
     volume_name = earlier or volume_fields.volume
     traded = {
-        session_date(row[volume_fields.date]): (parse_number(row[volume_name]), parse_number(row[volume_fields.change]))
+        parse_optional_roc_date(row[volume_fields.date]): (parse_number(row[volume_name]), parse_number(row[volume_fields.change]))
         for row in table_rows(volumes, [volume_fields.date, volume_name, volume_fields.change])
     }
     names = [price_fields.open, price_fields.high, price_fields.low, price_fields.close]
     bars = []
 
     for row in table_rows(prices, [price_fields.date, *names]):
-        session = session_date(row[price_fields.date])
+        session = parse_optional_roc_date(row[price_fields.date])
         open_price, high, low, close = (parse_number(row[name]) or 0.0 for name in names)
         volume, change = traded.get(session, (None, None))
 
@@ -202,12 +202,3 @@ def index_month(prices: Any, volumes: Any, feed: DailyReportFeed, board_lot_shar
             bars.append(Ohlcv(ts=stamp, open=open_price, high=high, low=low, close=close, volume=shares, change=change))
 
     return bars
-
-
-def session_date(text: str) -> date | None:
-    """'114/07/01' (ROC year 114) and '2025/07/01' are both 2025-07-01; a row that writes no date has None."""
-    try:
-        year, month, day = (int(part) for part in text.split("/"))
-        return date(year + ROC_YEAR_OFFSET if year < ROC_YEAR_OFFSET else year, month, day)
-    except ValueError:
-        return None

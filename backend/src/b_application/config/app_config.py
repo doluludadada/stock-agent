@@ -26,8 +26,6 @@ from a_domain.rules.trading.order_rule import (
     BrokerAccessRule,
     BrokerLoginRule,
     BuyLimitRule,
-    OrderGateRule,
-    OrderPriceRule,
     OrderRule,
     RealBrokerGateRule,
     RealBrokerOrdererRule,
@@ -72,16 +70,11 @@ class DbConfig(BaseSettings):
     """
     Where the app keeps its data: the PostgreSQL database, which holds every table, the article index's vectors
     included. Its address and credentials come from the environment or .env, never from a settings file, and the app
-    refuses to start while one is missing or blank. `retired` names the settings this section once had and no longer
-    reads (settings_notices).
+    refuses to start while one is missing or blank.
     """
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
-        env_file_encoding="utf-8",
-        extra="ignore",
-        str_strip_whitespace=True,
-        json_schema_extra={"retired": ["backend", "chroma_persist_path"]},
+        env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", str_strip_whitespace=True
     )
 
     user: str = Field(min_length=1, validation_alias="DB_USER")
@@ -95,26 +88,17 @@ class AppConfig(BaseSettings):
     """
     Application and infrastructure configuration. A section with no default here comes only from config/appsetting.yaml:
     load_settings passes it, and tests read it through tests/support/settings.py.
-    `retired` names the sections the file once had and the app no longer reads (settings_notices).
     """
 
-    model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
-        env_file_encoding="utf-8",
-        extra="ignore",
-        frozen=False,
-        json_schema_extra={"retired": ["strategy_search"]},
-    )
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", frozen=False)
 
     project_root: Path = Field(exclude=True)
     """Set by load_settings, never by a settings file: `exclude` marks a field the loader sets, and the key check refuses it."""
 
-    environment: SystemEnvironment = Field(
-        SystemEnvironment.DEV, json_schema_extra={"restart_only": True, "group": SettingGroup.SITE_ACCESS}
-    )
+    environment: SystemEnvironment = Field(json_schema_extra={"restart_only": True, "group": SettingGroup.SITE_ACCESS})
     """`restart_only` marks a setting a reload or a save refuses to change: validate_started_setup_unchanged."""
 
-    audience: Audience = Field(Audience.PERSONAL, json_schema_extra={"restart_only": True, "group": SettingGroup.SITE_ACCESS})
+    audience: Audience = Field(json_schema_extra={"restart_only": True, "group": SettingGroup.SITE_ACCESS})
     """
     Whom this deployment serves, and with it which data and brokers it may use: Audience's table. `group` names the
     SettingGroup the settings form shows a setting or a whole section under; a typed setting always shows under ADVANCED.
@@ -152,10 +136,8 @@ class AppConfig(BaseSettings):
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig, json_schema_extra={"operator_only": True})
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
-    trading: TradingConfig = Field(default_factory=TradingConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
-    mock_trading: MockTradingConfig = Field(
-        default_factory=MockTradingConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS}
-    )
+    trading: TradingConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    mock_trading: MockTradingConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     shioaji: ShioajiConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     holdings: HoldingsConfig = Field(default_factory=HoldingsConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
@@ -163,16 +145,12 @@ class AppConfig(BaseSettings):
     accounts: AccountsConfig = Field(json_schema_extra={"group": SettingGroup.SITE_ACCESS})
     api: ApiConfig = Field(default_factory=ApiConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
     sources: SourcesConfig = Field(json_schema_extra={"operator_only": True})
-    features: FeaturesConfig = Field(default_factory=FeaturesConfig, json_schema_extra={"group": SettingGroup.FEATURES})
+    features: FeaturesConfig = Field(json_schema_extra={"group": SettingGroup.FEATURES})
 
-    @field_validator("db", "trading", mode="before")
+    @field_validator("db", mode="before")
     @classmethod
     def empty_section_is_unset(cls, section: object) -> object:
-        """
-        A file without `db:` or `trading:`, or with one left holding nothing, as deleting its last retired setting leaves
-        it, reads like `db: {}` or `trading: {}`: db's settings come from the environment, trading's from their
-        defaults, and a refused one is named under its section.
-        """
+        """A `db:` that holds nothing reads like `db: {}`: db's settings come from the environment."""
         return {} if section is None else section
 
     def limit_price_rule(self) -> LimitPriceRule:
@@ -342,9 +320,11 @@ class AppConfig(BaseSettings):
         return ManualEntryRule(sizing_rule=self.sizing_rule())
 
     def order_rule(self) -> OrderRule:
-        price_rule = OrderPriceRule(pricing=self.audience.order_pricing, price_freshness=self.freshness.realtime_rule())
-
-        return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=self.limit_price_rule())
+        return OrderRule(
+            pricing=self.audience.order_pricing,
+            price_freshness=self.freshness.realtime_rule(),
+            limit_price_rule=self.limit_price_rule(),
+        )
 
     def broker_access_rule(self) -> BrokerAccessRule:
         """

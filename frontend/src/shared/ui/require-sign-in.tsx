@@ -1,38 +1,29 @@
 import { Briefcase, ListOrdered, LogIn, ShieldCheck, Star, UserRound } from 'lucide-react'
-import { createContext, useContext, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useTranslation } from '@/i18n'
-import { hasPermission, useSession, type Permission } from '@/shared/api'
+import { hasPermission, useAuthStatus, useSession, type Permission } from '@/shared/api'
+import { paths } from '@/shared/config/paths'
 import { cn } from '@/shared/lib/utils'
 import { Button } from './button'
 import { Skeleton } from './skeleton'
 import { StateBlock } from './state-block'
 
-/** Where to sign in or register; the app shell provides them, since shared code does not know the routes. */
-export interface AuthLinks {
-  /** The sign-in page, coming back to `next` afterwards. */
-  signIn: (next: string) => string
-  /** Null while the server takes no registrations. */
-  register: string | null
-}
-
-const AuthLinksContext = createContext<AuthLinks | null>(null)
-export const AuthLinksProvider = AuthLinksContext.Provider
-
-export function useAuthLinks(): AuthLinks | null {
-  return useContext(AuthLinksContext)
+/** The sign-in page, coming back to this page afterwards, and the register page, null while the server takes no registrations. */
+export function useAuthLinks(): { signIn: string; register: string | null } {
+  const location = useLocation()
+  const status = useAuthStatus()
+  return { signIn: paths.signInThen(`${location.pathname}${location.search}`), register: status.data?.registration_open === false ? null : paths.register }
 }
 
 /** The sign-in and register buttons, returning to the current page after sign-in. */
 export function SignInActions({ size = 'default' }: { size?: 'default' | 'sm' }) {
   const { t } = useTranslation()
   const links = useAuthLinks()
-  const location = useLocation()
-  if (!links) return null
   return (
     <>
       <Button asChild size={size}>
-        <Link to={links.signIn(`${location.pathname}${location.search}`)}>
+        <Link to={links.signIn}>
           <LogIn aria-hidden />
           {t('auth.signIn')}
         </Link>

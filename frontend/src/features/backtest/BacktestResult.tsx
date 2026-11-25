@@ -154,7 +154,7 @@ function NoTrades({ buyScore, onTryBuyScore }: { buyScore: number; onTryBuyScore
 function CurvePanel({ backtest }: { backtest: Backtest }) {
   const { t } = useTranslation('backtest')
   const format = useFormat()
-  const points = useMemo(() => returnCurve(backtest).map((point) => ({ date: point.date, value: point.strategy, benchmark: point.benchmark })), [backtest])
+  const points = useMemo(() => returnCurve(backtest), [backtest])
   return (
     <Panel title={t('curve.title')} aside={<span className="tabular">{t('period', { first: format.date(backtest.first_session), last: format.date(backtest.last_session) })}</span>}>
       <Suspense fallback={<Skeleton className="h-(--chart-price-height) rounded-xl" />}>

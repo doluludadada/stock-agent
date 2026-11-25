@@ -1,4 +1,4 @@
-from typing import Any, Protocol
+from typing import Protocol
 
 from a_domain.model.fundamentals.eps import Eps
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
@@ -61,13 +61,6 @@ class ITaiwanStockProvider(IStockProvider, Protocol):
 
     async def fetch_monthly_revenues(self) -> list[MonthlyRevenue]:
         """Both exchanges' monthly revenue summaries as served now, each row under the month it names."""
-        ...
-
-    def parse_monthly_revenue(self, row: dict[str, Any], market: MarketType) -> MonthlyRevenue | None:
-        """
-        One company's revenue of the month its row names ('11509', and '115/9' in MOPS's summary, are 2026-09), or None
-        when the row names no company or no valid month or served date ('1151109', or '115/11/09' in MOPS's summary).
-        """
         ...
 
     async def fetch_exchange_news(self) -> list[ExchangeNews]:

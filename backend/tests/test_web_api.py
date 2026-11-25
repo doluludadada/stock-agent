@@ -149,7 +149,7 @@ async def test_one_run_at_a_time_and_the_running_one_reads_as_running() -> None:
 async def test_a_run_stopped_by_unreadable_settings_reports_why_without_a_record() -> None:
     harness = build_harness()
 
-    async def broken_settings(initial):
+    async def broken_settings():
         raise ValueError("stored technical settings of local are not valid")
 
     harness.technical_settings.load = broken_settings

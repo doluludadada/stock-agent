@@ -13,12 +13,10 @@ from pathlib import Path
 import pytest
 import yaml
 from support.settings import running_on
-from trading_stack import SilentLogger
 
 from a_domain.ports.system.settings_files import SettingsProblem
 from a_domain.types.enums import Audience, SettingsFile, ShioajiServer, SystemEnvironment
 from b_application.config.settings_loader import InvalidSettingsError, load_settings, production_notice, startup_settings
-from c_infrastructure.system.settings_files import SettingsFiles
 
 BACKEND = Path(__file__).resolve().parents[1]
 ROOT = BACKEND.parent
@@ -248,12 +246,11 @@ def test_an_unsafe_trading_setup_is_located_at_the_setting_it_names(tmp_path: Pa
         (tmp_path / "config" / file.file_name).write_text(text, encoding="utf-8")
     (tmp_path / "config" / "strategies").symlink_to(CONFIG / "strategies")
     text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
-    files = SettingsFiles(
-        project_root=tmp_path, max_bytes=262_144, backups_kept=3, running=running_on(SystemEnvironment.DEV), logger=SilentLogger()
-    )
 
-    problems = files.check({SettingsFile.APPSETTING: text}, "127.0.0.1", 0)
-    [problem] = [problem for problem in problems if problem.path == "environment"]
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(tmp_path, {SettingsFile.APPSETTING: text}, running_on(SystemEnvironment.DEV), unsettled=0)
+
+    [problem] = [problem for problem in refused.value.problems if problem.path == "environment"]
 
     assert (problem.path, problem.line) == ("environment", at(text, "environment: prod")[0])
     assert problem.message == (
@@ -491,7 +488,9 @@ def test_no_variable_sets_the_sinopac_server_and_a_start_on_production_says_whet
     ordering_on = production_settings("false").replace('sinopac_ordering: "off"', "sinopac_ordering: administrators", 1)
     monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
 
-    assert startup_settings(project, {SettingsFile.APPSETTING: without_server}, unsettled=0).shioaji.server == ShioajiServer.SIMULATION
+    with pytest.raises(InvalidSettingsError, match="shioaji.server: Field required"):
+        startup_settings(project, {SettingsFile.APPSETTING: without_server}, unsettled=0)
+
     assert production_notice(startup_settings(project, {SettingsFile.APPSETTING: ordering_on}, unsettled=0)) == [
         "SinoPac's login is on the production server, real money: features.sinopac_ordering is administrators"
     ]

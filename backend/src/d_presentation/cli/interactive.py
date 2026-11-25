@@ -138,9 +138,8 @@ async def run_menu(switch: RuntimeSwitch, user: User) -> None:
     setup the menu shows (the brokers, a real broker's server and limits) is the one the chosen option runs on, and an
     edit made during an option waits for the next round. An option that may send an order looks at the files once
     more after the choice: settings that changed while the menu waited, a Web save included, print the menu again on
-    them instead. A Shioaji login that is due is made again before the menu prints (RuntimeSwitch.log_in_again), and
-    for an option that may send an order once more after the choice: a login made again while the menu waited prints
-    the menu again on it, so the option runs on the new login. These are the CLI's only renewals of the login. The user
+    them instead. The Shioaji login is made again where it is due (Runtime.login_due) before the menu prints and, for
+    an option that may send an order, once more after the choice, which prints the menu again on a new login. The user
     is read again before each option; menu 8's strategy carries over to the next round while the settings still have it.
     """
     built_in_strategy_id: str | None = None

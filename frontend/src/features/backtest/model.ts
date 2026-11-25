@@ -2,6 +2,7 @@ import type { FieldProblem, Schemas } from '@/shared/api'
 import { sessionDate } from '@/shared/lib/chart-range'
 import { monthsBefore, periodProblems, type Period, type PeriodProblem } from '@/shared/lib/dates'
 import { directionOf, type Direction } from '@/shared/lib/direction'
+import type { ComparisonPoint } from '@/shared/ui/comparison-chart'
 
 export type Backtest = Schemas['BacktestResponse']
 export type BacktestSummary = Schemas['BacktestSummary']
@@ -41,27 +42,19 @@ export function winRate(backtest: BacktestSummary): number | null {
   return backtest.trade_count ? backtest.winning_trades / backtest.trade_count : null
 }
 
-/** One session of both curves as a return since the backtest began, so the account and the index share one axis. */
-export interface ReturnPoint {
-  date: string
-  /** The account's equity over the starting cash, minus one. */
-  strategy: number
-  /** The TAIEX close over its close on the first session, minus one; null on a session the index has no bar for. */
-  benchmark: number | null
-}
-
 /**
- * Both curves from the same start, oldest first. Their last points are the answer's `total_return_pct` and
- * `benchmark_return_pct`, because the bases are the same: the starting cash and the index's first bar.
+ * Both curves from the same start, oldest first, as a return since the backtest began: the account's equity over the
+ * starting cash, and the TAIEX close over its first close (null on a session the index has no bar for), each minus one.
+ * Their last points are the answer's `total_return_pct` and `benchmark_return_pct`, because the bases are the same.
  */
-export function returnCurve(backtest: Pick<Backtest, 'equity_curve' | 'benchmark' | 'inputs'>): ReturnPoint[] {
+export function returnCurve(backtest: Pick<Backtest, 'equity_curve' | 'benchmark' | 'inputs'>): ComparisonPoint[] {
   const base = backtest.benchmark[0]?.close
   const closes = new Map(backtest.benchmark.map((bar) => [sessionDate(bar.ts), bar.close]))
   return Object.entries(backtest.equity_curve)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, account]) => {
       const close = closes.get(date)
-      return { date, strategy: account.equity / backtest.inputs.initial_cash - 1, benchmark: base && close !== undefined ? close / base - 1 : null }
+      return { date, value: account.equity / backtest.inputs.initial_cash - 1, benchmark: base && close !== undefined ? close / base - 1 : null }
     })
 }
 

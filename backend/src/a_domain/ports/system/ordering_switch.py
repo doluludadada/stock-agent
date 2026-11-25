@@ -14,8 +14,8 @@ class IOrderingSwitch(Protocol):
 
     async def read(self) -> SiteOrdering | None:
         """
-        What the site says now, from one read of the files: whom it lets order on each broker, OFF where the settings
-        do not set it, and the server shioaji.server names. None while the files on disk are ones the app would not
-        load: settings no start accepts let nobody order.
+        What the site says now, from one read of the files: whom it lets order on each broker and the server
+        shioaji.server names. None while the files on disk are ones the app would not load, such as one that leaves
+        out a broker's ordering feature or the server: settings no start accepts let nobody order.
         """
         ...

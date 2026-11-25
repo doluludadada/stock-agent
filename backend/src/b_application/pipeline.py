@@ -4,7 +4,6 @@ from datetime import date, time
 
 from pydantic import PositiveInt, SecretStr
 
-from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -17,6 +16,7 @@ from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, Valuati
 from a_domain.model.valuation.valuation import StockValuation, ValuationReport
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
@@ -49,14 +49,12 @@ from b_application.schemas.backtest import BacktestSetup
 from b_application.schemas.collect import (
     ArchivedPeriods,
     ArticleBackfill,
-    ArticleRefresh,
     CompanyBackfill,
     HistoryBackfill,
     HistoryCoverage,
     RealtimeQuotes,
     StockFinancials,
     WorldOverview,
-    WorldUpdate,
 )
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.schemas.process import CompanyFacts, HeldBriefs, StockEvaluation
@@ -107,13 +105,13 @@ from b_application.use_cases.process.stock_brief_context import StockBriefContex
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.technical_settings_loader import TechnicalSettingsLoader
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
+from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.run_lookup import RunLookup
@@ -147,7 +145,6 @@ from b_application.use_cases.users.first_administrator_setup import FirstAdminis
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
-from b_application.use_cases.users.password_reset import PasswordReset
 from b_application.use_cases.users.ranking_follow_choice import RankingFollowChoice
 from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
@@ -166,43 +163,27 @@ from b_application.use_cases.valuation.valuation_screener import ValuationScreen
 class Pipeline:
     """
     Every operation the CLI, the Web API and the LINE webhook start. Each line of an operation names one step, the
-    values it reads from the run's PipelineStatus and the field that keeps what it returns.
-    An operation asks an AI, records a run or sends an order only where its lines call the step that does, so no
-    operation's docstring says what it does not do.
+    values it reads from the run's PipelineStatus and the field that keeps what it returns. An operation asks an AI,
+    records a run or sends an order only where its lines call the step that does, so no operation's docstring says what
+    it does not do.
 
     A trading operation loads its technical strategy before its run record exists, so invalid settings stop a run that
-    never started, and the run keeps that strategy until it ends. It then runs inside RunHistory.execute, so it has one
-    run id and a saved run record; the Web API starts Full Cycle and specific-stock analysis under a run id it already
-    returned to its caller. The valuation operations record no run and read only fields that cannot order.
+    never started. It then runs inside RunHistory.execute.
 
-    Buzz, Intraday, manual BUY and both follows send orders with the same four lines: each decision of the run that has no order yet,
-    one at a time in decision order. OrderPreparation gates it and records its order right before the send, so OrderRule
-    measures the quote's age at submission and BrokerAccessRule checks the broker the order would reach; OrderExecution
-    sends it only when it is PENDING and records the broker's answer; OrderOutcome re-reads the account after a fill;
-    and the order joins status.orders before the next decision is prepared, so a decision never gets a second order.
-    Before its first order, a run on a real broker settles the orders of ended runs whose outcome was not read when
-    they were sent (UNCONFIRMED), so its account and the day's BUY limit see what the broker did, and after its last
-    order it settles its own (OrderSettlement); on the mock account nothing awaits settlement.
-    Buzz and Intraday send twice: right after the stop-loss check, while those quotes are fresh, and at the end. Full
-    Cycle, specific-stock analysis and valuation never send; a follow sends a finished Full Cycle's decisions, priced
-    again, into the user's mock account, and a ranking follow what brings the account of the run's broker to the
-    monthly ranking.
+    Buzz, Intraday, manual BUY and both follows send orders with the same four lines, one decision at a time in decision
+    order. OrderPreparation gates the order and records it, OrderExecution sends it, OrderOutcome takes a fill into the
+    account, and the order joins status.orders before the next decision, so no decision gets a second order. On a real
+    broker a run first settles the orders that ended runs left UNCONFIRMED, and after its last order it settles its own
+    (OrderSettlement).
 
-    Which broker the ordering steps hold (account_loader, order_preparation, order_execution, order_outcome) is the
-    run's choice, fixed when dependencies.py builds this Pipeline for the run: the mock account unless an administrator
-    chose a real broker. The mock_* steps always hold the user's mock account, and a follow of a run uses only them. A
-    ranking follow orders on the run's choice, and on a real broker only on its simulation server: its candidates step
-    refuses any other login before the account is read, and the order gates refuse each order again (SimulationOnlyRule).
-
-    A built-in strategy id, the CLI session's choice, makes a run use that built-in strategy instead of the saved one.
-
-    Whose data an operation reads and writes is fixed when dependencies.py builds this Pipeline: every port that holds
-    a user's data was built for one signed-in user, or for nobody (a signed-out Pipeline, whose such ports refuse with
-    SignInRequired). No operation takes an owner, so none can be handed the wrong one.
+    dependencies.py builds this Pipeline for one run's broker and one signed-in user, or for nobody, whose ports of a
+    user's data refuse with SignInRequired. The ordering steps (account_loader, order_preparation, order_execution,
+    order_outcome) hold the run's broker, which is the mock account unless an administrator chose a real broker. The
+    mock_* steps always hold the user's mock account, and a follow of a run uses only them. A ranking follow orders on a
+    real broker only on its simulation server (SimulationOnlyRule).
     """
 
     strategy_loader: StrategyLoader
-    technical_settings_loader: TechnicalSettingsLoader
     technical_settings_repository: ITechnicalSettingsRepository
     run_history: RunHistory
     account_loader: AccountLoader
@@ -231,7 +212,6 @@ class Pipeline:
     world_lookup: WorldLookup
     world_brief_context: WorldBriefContext
     world_brief: DailyStockBrief
-    world_brief_lookup: BriefLookup
     company_background: CompanyBackground
     company_card: DailyStockBrief
     company_card_lookup: BriefLookup
@@ -276,6 +256,7 @@ class Pipeline:
     holding_repository: IHoldingRepository
     reporting: Reporting
     run_reports: RunReports
+    recent_runs: RecentRuns
     run_lookup: RunLookup
     account_history: AccountHistory
     backtest_options: BacktestOptions
@@ -305,11 +286,11 @@ class Pipeline:
     google_sign_in_start: GoogleSignInStart
     google_identity_check: GoogleIdentityCheck
     google_account: GoogleAccount
-    password_reset: PasswordReset
     user_registration: UserRegistration
     session_start: SessionStart
     signed_in_user: SignedInUser
     user_store: IUserStore
+    market_clock: IMarketClock
     user_change: UserChange
     ai_model_lookup: AiModelLookup
     ai_model_choice: AiModelChoice
@@ -340,9 +321,8 @@ class Pipeline:
 
     async def run_buzz_scan(self, run_id: RunId | None = None, built_in_strategy_id: str | None = None) -> PipelineStatus:
         """
-        Social momentum. Stop-loss SELLs go first, while their quotes are fresh; then the buzz stocks are analysed and
-        decided. Every buzz stock is screened, so one without daily history gets a failing report. Sentiment is report
-        only, so it runs after every trading step.
+        Social momentum. Stop-loss SELLs go first, while their quotes are fresh. Every buzz stock is screened, so one
+        without daily history gets a failing report. Sentiment is report only, so it runs after every trading step.
         """
         strategy = await self.strategy_loader.execute(Workflow.BUZZ_SCAN, built_in_strategy_id)
 
@@ -384,8 +364,7 @@ class Pipeline:
     async def run_intraday(self, run_id: RunId | None = None, built_in_strategy_id: str | None = None) -> PipelineStatus:
         """
         Revalidates the held and watched stocks. Stop-loss SELLs go first, while their quotes are fresh. A stock the run
-        stopped out or could not quote gets no history, news or AI call, so a later fresh quote does not bring it back.
-        Only stocks with daily history are screened, and every held stock screened gets its exit decided.
+        stopped out or could not quote is analysed no further, and every held stock screened gets its exit decided.
         """
         strategy = await self.strategy_loader.execute(Workflow.INTRADAY, built_in_strategy_id)
 
@@ -430,10 +409,8 @@ class Pipeline:
         self, stock_ids: list[str], run_id: RunId | None = None, built_in_strategy_id: str | None = None
     ) -> PipelineStatus:
         """
-        Complete reports for the stocks the user asked for. Every stock goes through news and AI whatever its technical
-        verdict, so the user can review it before a manual BUY, and a stock without daily history gets a failing report.
-        Where the audience reads no news site, a stock with no archived article and no archived financials skips the AI
-        call.
+        Complete reports for the stocks the user asked for. Each goes through news and AI whatever its technical
+        verdict, so the user can review it before a manual BUY. One without daily history gets a failing report.
         """
         strategy = await self.strategy_loader.execute(Workflow.SPECIFIC_STOCKS, built_in_strategy_id)
 
@@ -454,12 +431,7 @@ class Pipeline:
 
     async def buy_manually(self, stock: Stock, quantity: PositiveInt | None = None, run_id: RunId | None = None) -> PipelineStatus:
         """
-        The user's confirmed BUY of one analysed stock, as its own recorded run: `quantity` shares, or with None as many
-        as sizing on the account's equity allows. It skips only the automatic buy threshold: the account, a fresh
-        realtime quote, the decision record, the order gates (market open, price freshness, the broker the run chose
-        and its limits) and the broker's own checks all still apply. The Web passes a stock a finished specific-stock
-        run reported, whose saved price is a daily close the gates refuse, so only the realtime quote can price it.
-
+        The user's confirmed BUY of one analysed stock, as its own recorded run (ManualSignal).
         status.manual_buy_refusal says why no order was sent; otherwise status.orders holds the one order.
         """
         async with self.run_history.execute(Workflow.MANUAL_BUY, run_id) as stats:
@@ -481,14 +453,8 @@ class Pipeline:
 
     async def follow_run(self, followed_run_id: RunId, run_id: RunId | None = None) -> PipelineStatus:
         """
-        The user's follow of one of their finished runs into their mock account, as its own recorded run that names the
-        run it follows. Each decision still open to follow is priced again at the price this site orders at now: a
-        fresh realtime quote in continuous trading where the site has them, else the official close of the last closed
-        session while no session trades. A decision that gets no follow decision now stays open; one whose follow order
-        fills is followed. A follow that may not start (FollowCandidates' refusal) records the refusal and sends nothing.
-        Every step that reads the account, gates or sends an order holds the user's mock book (mock_account_loader,
-        mock_order_preparation, mock_order_execution, mock_order_outcome), never the broker the run chose, so no follow
-        reaches a real account whatever broker its Pipeline was built for.
+        The user's follow of one of their finished runs into their mock account, as its own recorded run. A follow that
+        FollowCandidates refuses records the refusal and sends nothing.
         """
         async with self.run_history.execute(Workflow.FOLLOW, run_id, followed_run_id) as stats:
             status = PipelineStatus(stats=stats)
@@ -516,10 +482,7 @@ class Pipeline:
         return status
 
     async def load_follow(self, run_id: RunId) -> PipelineStatus:
-        """
-        The run page's follow panel, and the check before a follow starts: the run, its decisions still open to follow,
-        every follow of them so far with its order, and why a follow may not start now.
-        """
+        """The run page's follow panel, and the check before a follow starts, as FollowCandidates answers them."""
         status = PipelineStatus.read_only(Workflow.FOLLOW)
         status.followed_run, status.followable_signals, status.follows, status.follow_refusal = await self.follow_candidates.execute(
             run_id
@@ -529,38 +492,19 @@ class Pipeline:
 
     async def follow_ranking(self, user: User, run_id: RunId | None = None, *, scheduled: bool = False) -> PipelineStatus:
         """
-        The user's follow of the monthly ranking's latest decision into their follow account, as its own recorded run
-        on this Pipeline's broker, started by the user or, `scheduled`, by the site's schedule of that user, which the
-        run's record says: a SELL of each holding the ranking left, then a BUY of each ranked stock the account lacks
-        at an equal weight of the account (RankingFollowRule), each priced as this site prices an order now, like a
-        follow of a run; every holding is priced too, since the equal weight is a share of the account's value. A
-        ranked stock the account already holds is left as it is, so a second follow of the same decision sends nothing
-        but what the first could not fill, except by the follows of a switch of the active formula, which also top each
-        one short of its equal weight up to it (TopUpRule) for the switch's first ranking.top_up_follow_days days, until
-        one of them finished the decision. The follow account and the switch are asked first, once
-        (RankingFollowSchedule): a run on another broker than it fails before anything is read (FollowAccountChanged),
-        and a follow account the site does not
-        offer the user now, or a market phase no order is placed in, ends the run with nothing sent, on this account
-        and on any other. After its orders it looks at the account once more, so its record says how many stocks it
-        left to trade: the schedule follows the decision again until a follow left none. Every step that gates or
-        sends an order holds this Pipeline's broker (account_loader, order_preparation, order_execution,
-        order_outcome), and on SinoPac the order gates refuse each order on a login that is not on the simulation
-        server, so no ranking follow orders with real money. On a real broker the BUYs are planned inside the BUY
-        limits that follow the account's equity as the run valued it (trading.max_order_equity_pct,
-        trading.max_daily_buy_equity_pct) and the broker's own trading limit, best first, and a BUY they or the account's
-        cash leave no room for until the follow's sales settle waits for a later follow (RankingFollowRule).
-        RankingUnavailable while the history holds no decision session.
+        The user's follow of the monthly ranking's latest decision on their follow account, as its own recorded run.
+        RankingUnavailable without a decision session. FollowAccountChanged when the run is on another account.
         """
         async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id, scheduled=scheduled) as stats:
             status = PipelineStatus(stats=stats)
-            account, schedule, _ = await self.ranking_follow_schedule.execute(user)
+            settings = await self.ranking_follow_schedule.execute(user)
             history = await self.ranking_history_loader.execute()
             ranking = await self.latest_ranking.execute(history)
             holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(
-                account, ranking, schedule.switched_from, status.stats
+                settings.account, ranking, settings.schedule.switched_from, status.stats
             )
 
-            if account.refusal is not None or status.follow_refusal is not None:
+            if settings.account.refusal is not None or status.follow_refusal is not None:
                 return status
 
             await self.order_settlement.execute(status.stats)
@@ -570,7 +514,7 @@ class Pipeline:
             await self.data_collector.execute(traded, 1, status.stats)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(traded, status.stale_stock_ids, status.stats)
             status.equity, status.signals = await self.ranking_follow_signals.execute(
-                ranking, status.stocks, status.account, schedule.switched_from, status.stats
+                ranking, status.stocks, status.account, settings.schedule.switched_from, status.stats
             )
             for signal in status.signals:
                 if order := await self.order_preparation.execute(signal, status.orders, status.equity, status.stats):
@@ -579,29 +523,22 @@ class Pipeline:
                     status.orders.append(order)
             status.orders = await self.order_settlement.execute(status.stats, status.orders)
             await self.ranking_follow_candidates.execute(
-                account, ranking, schedule.switched_from, status.stats, status.stocks, status.equity
+                settings.account, ranking, settings.schedule.switched_from, status.stats, status.stocks, status.equity
             )
 
         return status
 
     async def load_ranking_follow(self, user: User) -> RankingFollow:
         """
-        The ranking page's follow block, and the check before a ranking follow starts: the user's follow account, the
-        accounts the site offers them as one and where their schedule stands; which of the ranking's stocks that
-        account holds and lacks, which holdings the ranking left, and why a follow may not start now, the account being
-        read only while the site offers it; what the mock account made since it first followed the ranking, against
-        the ranking's benchmark, while it is the follow account the site offers (FollowAccount.measured); and the
-        user's ranking follows that took a decision, on the mock account since it opened and on SinoPac, each with its
-        account and the formula it used.
-        RankingUnavailable while the history holds no decision session.
+        The ranking page's follow block and the check before a ranking follow starts, with the mock account's return
+        while the follow account is measured (FollowAccount.measured). RankingUnavailable without a decision session.
         """
-        account, schedule, follows = await self.ranking_follow_schedule.execute(user)
+        settings = await self.ranking_follow_schedule.execute(user)
         history = await self.ranking_history_loader.execute()
         ranking = await self.latest_ranking.execute(history)
-        holdings, refusal = await self.ranking_follow_candidates.execute(account, ranking, schedule.switched_from)
-        settings = RankingFollowSettings(account, schedule, follows)
+        holdings, refusal = await self.ranking_follow_candidates.execute(settings.account, ranking, settings.schedule.switched_from)
 
-        if not account.measured:
+        if not settings.account.measured:
             return RankingFollow(settings, holdings, refusal, None)
 
         mock_account, _, curve, _ = await self.mock_account_history.execute(None, None)
@@ -610,46 +547,24 @@ class Pipeline:
         return RankingFollow(settings, holdings, refusal, performance)
 
     async def load_follow_schedule(self, user: User) -> RankingFollowSettings:
-        """
-        My settings' ranking follow, and the timer's question for one user: the user's follow account and the accounts
-        the site offers them as one now, the time the user scheduled the follow at and the times the site offers, the
-        ranking's latest decision while no follow of that account finished it, and whether the schedule follows it
-        now; and the user's ranking follows that took a decision. It answers on a site whose history holds no session
-        yet: nothing is pending there.
-        """
-        account, schedule, follows = await self.ranking_follow_schedule.execute(user)
-
-        return RankingFollowSettings(account, schedule, follows)
+        """My settings' ranking follow, and the timer's question for one user, as RankingFollowSchedule answers them."""
+        return await self.ranking_follow_schedule.execute(user)
 
     async def choose_ranking_follow(self, user: User, follow_time: time | None, broker: ExecutionProvider) -> User:
         """
-        My settings: saves the user's follow account and the time from which the site follows the ranking there by
-        itself, or None for no schedule, and answers the user with it. Saving nothing: FollowBrokerNotOffered for a
-        new account, or a schedule on an account, the site does not offer the user now, FollowTimeNotOffered for a
-        time the site does not offer.
+        My settings' save of the user's follow account and follow time, None for no schedule, answering the user.
+        FollowBrokerNotOffered or FollowTimeNotOffered, saving nothing, for an account or time the site does not offer.
         """
-        follow_account, _, _ = await self.ranking_follow_schedule.execute(user)
+        settings = await self.ranking_follow_schedule.execute(user)
 
-        return await self.ranking_follow_choice.execute(user, follow_time, broker, follow_account)
+        return await self.ranking_follow_choice.execute(user, follow_time, broker, settings.account)
 
     async def load_scheduled_followers(self) -> list[User]:
-        """
-        The Web API's timer: the users whose scheduled ranking follow may run now. Nobody outside the phase this site
-        places an order in. The timer then asks each one's own Pipeline whether a follow is due (load_follow_schedule),
-        asks this again so that the user's schedule is still on and on the same follow account, and starts the follow
-        there (follow_ranking), on the user's follow account and no other.
-        """
+        """The users whose scheduled ranking follow may run now, for the Web API's timer."""
         return await self.scheduled_followers.execute()
 
     async def settle_orders(self) -> list[Order]:
-        """
-        The Web API's timer: the runs on the site's real broker an earlier process left without an end, ended with
-        their open orders UNCONFIRMED (AbandonedRuns), then the orders of this user's ended runs on it whose outcome was
-        not read when they were sent, settled from the broker's own record of the day (OrderSettlement), each as it ends
-        now. Whatever this Pipeline's broker and the user's rights now: it only reads and cancels what the user's
-        journal holds of it. While the login is down or the site has no real broker, only the orders of an earlier
-        session are settled: they fail with what they recorded.
-        """
+        """For the Web API's timer, ends abandoned runs and settles the UNCONFIRMED orders of this user's runs on the real broker."""
         await self.abandoned_runs.execute()
         return await self.order_settlement.execute(None)
 
@@ -662,18 +577,13 @@ class Pipeline:
         return await self.mock_account_reset.execute(initial_cash)
 
     async def load_brokerage_statement(self) -> BrokerageAccount:
-        """
-        The SinoPac account page: the real broker's account as the broker reports it now, None while the site has no
-        real broker for the user or its login is down, and why the login could not switch to the other server, None
-        while it could.
-        """
+        """The SinoPac page's account as the real broker reports it now, and why its login could not switch servers."""
         return await self.brokerage_statement.execute()
 
     async def load_holdings(self, sources: frozenset[HoldingSource]) -> PortfolioAnalysis:
         """
-        The My holdings page: what the user holds under each of `sources` it could read, as one portfolio at the last
-        closes held, each stock with its standing in the monthly ranking, the one load_ranking_standing answers on the
-        stock page. RankingUnavailable while the history holds no decision session.
+        The My holdings page's portfolio of what the user holds under each of `sources` it could read, each stock with
+        its ranking standing. RankingUnavailable without a decision session.
         """
         held = await self.held_positions.execute(sources)
         history = await self.ranking_history_loader.execute()
@@ -685,10 +595,7 @@ class Pipeline:
     async def enter_holding(
         self, stock_id: str, quantity: PositiveInt, average_cost: PositiveFiniteFloat, opened_on: date | None
     ) -> Position | None:
-        """
-        The My holdings page's entry: the user's hand-entered holding of a listed stock, replacing an earlier one of the
-        same stock. None, and nothing kept, when the listing has no such stock.
-        """
+        """The My holdings page's hand-entered holding. None, and nothing kept, when the listing has no such stock."""
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.manual_stocks = await self.stock_lookup.execute([stock_id], status.stats)
 
@@ -702,10 +609,7 @@ class Pipeline:
         return await self.holding_repository.remove(stock_id)
 
     async def watch_manually(self, stock_ids: list[str]) -> ManualWatch:
-        """
-        Menu 4 and the watchlist endpoint: the listed stocks join the MANUAL watchlist, which never expires. When the
-        listing lacks one of the ids nothing is added: the addition is None, and the stocks found tell which ids.
-        """
+        """Menu 4 and the watchlist endpoint's MANUAL watch. When the listing lacks an id, nothing is added."""
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.manual_stocks = await self.stock_lookup.execute(stock_ids, status.stats)
 
@@ -719,10 +623,7 @@ class Pipeline:
         return await self.watchlist_repository.remove(stock_ids, WatchlistType.MANUAL)
 
     async def load_watchlist(self) -> PipelineStatus:
-        """
-        The watchlist endpoint: every active entry, one per stock and watchlist type, and the listing that names the
-        watched stocks; a listing outage leaves them unnamed rather than failing the page.
-        """
+        """The watchlist endpoint's active entries and the listing that names them; a listing outage leaves them unnamed."""
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.watchlist = await self.watchlist_repository.get_active()
         status.universe_stocks = await self.stock_lookup.execute(None, status.stats)
@@ -731,27 +632,21 @@ class Pipeline:
 
     async def load_runs(self, limit: int, offset: int) -> list[SystemStats]:
         """The runs endpoint: `limit` recorded runs, newest first, after the `offset` newest, whichever entry point started them."""
-        records, *_ = await self.run_lookup.execute(limit=limit, offset=offset)
-
-        return records
+        return await self.recent_runs.execute(limit, offset)
 
     async def load_run(self, run_id: RunId) -> PipelineStatus | None:
-        """
-        One recorded run as its status: the record, the specific-stock reports as manual_stocks, the decisions and the
-        orders. None when the journal holds no such run.
-        """
-        records, reports, signals, orders = await self.run_lookup.execute(run_id)
+        """One recorded run as its status, its specific-stock reports as manual_stocks. None when the journal holds no such run."""
+        run = await self.run_lookup.execute(run_id)
 
-        if not records:
+        if run is None:
             return None
 
-        return PipelineStatus(stats=records[0], manual_stocks=reports, signals=signals, orders=orders)
+        record, reports, signals, orders = run
+
+        return PipelineStatus(stats=record, manual_stocks=reports, signals=signals, orders=orders)
 
     async def load_account_history(self, as_of: date | None, since: date | None = None) -> PipelineStatus:
-        """
-        Menu 7 and the account endpoint: the account now, its equity curve, from `since` on where a day is given, and
-        the account as of a date.
-        """
+        """The account now, its equity curve from `since` on, and the account as of `as_of`, for menu 7 and the account endpoint."""
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.account, status.held_stocks, status.equity_curve, status.account_as_of = await self.account_history.execute(
             as_of, since
@@ -760,43 +655,27 @@ class Pipeline:
         return status
 
     async def load_backtest_options(self, built_in_strategy_id: str | None = None) -> BacktestSetup:
-        """
-        The backtest page: the strategy a backtest would replay, the owner's active one or a built-in one, and the
-        inputs of the longest backtest the held daily history allows at the live settings; None while it allows none. It
-        loads no bar.
-        """
+        """The backtest page's strategy and the inputs of the longest backtest the held history allows, None while it allows none."""
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
 
         return BacktestSetup(strategy, await self.backtest_options.execute(strategy))
 
     async def run_backtest(self, inputs: BacktestInputs, built_in_strategy_id: str | None = None) -> Backtest:
-        """
-        What the strategy would have done over the sessions `inputs` name: its scores of every listed stock on every
-        session, the live trading rules replayed on those scores alone, and the result saved for the user. It reads
-        only daily history the site already holds. BacktestPeriodUnavailable for a period the held history cannot
-        replay.
-        """
+        """Replays the strategy over `inputs` and saves the result. BacktestPeriodUnavailable outside the held history."""
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
 
         return await self.backtest_run.execute(strategy, inputs)
 
     async def load_ranking(self, formula_name: FormulaId | None = None) -> Ranking:
-        """
-        The monthly stock ranking at the latest decision session the held daily history holds, by the formula named,
-        the active one when none is: its stocks with each factor, its rank and the score, the session and the revenue
-        month it read, or that the formula holds cash. It reads only the held history and the archived revenue.
-        RankingUnavailable while the history holds no decision session.
-        """
+        """The monthly ranking by the formula named, else the active one. RankingUnavailable without a decision session."""
         history = await self.ranking_history_loader.execute()
 
         return await self.latest_ranking.execute(history, formula_name=formula_name)
 
     async def load_ranking_standing(self, stock_id: str) -> RankingStanding:
         """
-        The stock page: where the stock stands in the monthly ranking at the latest decision session the held history
-        holds, its place among the scored stocks, its score from 0 to 100 and its formula's factors, or why the ranking leaves
-        it out. It reads what load_ranking reads, from the same held history. RankingUnavailable while the history holds
-        no decision session.
+        The stock page's standing of the stock in the ranking load_ranking answers, or why it is left out.
+        RankingUnavailable without a decision session.
         """
         history = await self.ranking_history_loader.execute()
 
@@ -805,22 +684,15 @@ class Pipeline:
         return standings[stock_id]
 
     async def run_ranking_backtest(self, first: date, last: date, formula_name: FormulaId | None = None) -> RankingBacktest:
-        """
-        The monthly ranking replayed over the decision sessions from `first` to `last` against its benchmark held over
-        the same sessions, at the live fee and tax, by the formula named, the active one when none is: its value at
-        every session, each decision's ranking and holdings. It reads only the held history and the archived revenue
-        and saves nothing. BacktestPeriodUnavailable for a period without a decision session.
-        """
+        """The ranking replayed from `first` to `last` against its benchmark. BacktestPeriodUnavailable without a decision session."""
         history = await self.ranking_history_loader.execute()
 
         return await self.ranking_replay.execute(history, first, last, formula_name)
 
     async def compare_ranking_formulas(self, first: date, last: date) -> FormulaComparison:
         """
-        The ranking page's evidence beside the choice of a formula: the active formula's name, and every formula of the
-        settings replayed over the same period on the same history and costs, and again at the comparison's liquidity
-        floor, one replay at a time.
-        BacktestPeriodUnavailable for a period without a decision session.
+        Every formula replayed over one period, and again at the liquidity floor. BacktestPeriodUnavailable for a period
+        without a decision session.
         """
         history = await self.ranking_history_loader.execute()
 
@@ -839,10 +711,7 @@ class Pipeline:
         return await self.backtest_repository.delete(backtest_id)
 
     async def load_market_valuation(self) -> MarketValuation:
-        """
-        Every listed and OTC stock with its official close, TTM EPS and industry: bulk sources, a few requests. The
-        steps' errors so far, such as a MOPS quarter that failed, become the valuation's source warnings.
-        """
+        """Every listed and OTC stock with its official close, TTM EPS and industry; the steps' errors become source warnings."""
         status = PipelineStatus.read_only(Workflow.VALUATION)
         status.universe_stocks = await self.stock_lookup.execute(None, status.stats)
         await self.fundamentals_feed.execute(status.universe_stocks, status.stats)
@@ -856,7 +725,7 @@ class Pipeline:
         return self.valuation_appraiser.execute(valuations, target_pe)
 
     def screen_valuation(self, market: MarketValuation, criteria: ScanCriteria) -> ValuationScan:
-        """The undervalued scan's valuation step at the user's criteria. It offers at most max_scan_explanations stocks to the AI."""
+        """The undervalued scan's valuation step at the user's criteria."""
         return self.valuation_screener.execute(market, criteria)
 
     async def confirm_valuation_technical(self, scan: ValuationScan, built_in_strategy_id: str | None = None) -> ValuationScan:
@@ -884,36 +753,21 @@ class Pipeline:
         return await self.most_traded.execute()
 
     async def load_page_quotes(self, stock_ids: list[str], indexes: list[MarketIndex]) -> RealtimeQuotes:
-        """
-        The pages' realtime quotes: today's quote of each of these stocks and market indexes that has one, from the
-        board every page shares, and when a page asks again. It reads quotes alone.
-        """
+        """The pages' realtime quotes of these stocks and indexes from the shared board, and when a page asks again."""
         return await self.page_quotes.execute(stock_ids, indexes)
 
     async def archive_daily_closes(self) -> ArchivedPeriods:
-        """
-        The Web API's timer: the official closes, material information, EPS statistics, valuation ratios, balance
-        sheets, income statements, monthly revenue and TWSE news the TWSE and TPEX OpenAPI serve now, saved into the
-        archive, then every date, quarter and month it holds. `just archive-closes` runs the same step without a
-        Pipeline, which would need every adapter (open_archiver).
-        """
+        """For the Web API's timer, saves what the TWSE and TPEX OpenAPI serve now and answers what the archive holds."""
         return await self.daily_close_archiver.execute()
 
     async def refresh_daily_history(self) -> HistoryCoverage | None:
-        """
-        The Web API's timer on a personal site: the exchanges' daily reports of every session the history cache lacks
-        over the stock page's longest chart, then what backfill_history answers of the daily history over that window;
-        None where the daily history is the open-data archive's.
-        """
+        """For the Web API's timer, brings the history cache up to the last settled session. None on a public site."""
         return await self.daily_history_backfill.execute()
 
     async def backfill_history(self, first: date) -> HistoryBackfill:
         """
-        `just backfill-history`: what a ranking backtest and the stock pages' trends read, back to `first` on a personal
-        site. It answers the daily history's sessions held, those still lacking and the index ranges it could not read,
-        the months of revenue read of those due, and the quarters of EPS held of those due. Each part saves what it
-        fetched as it comes, so a rerun after a failure or a timeout fetches only what is still missing. A part the site
-        does not read is None: a public site reads none.
+        For `just backfill-history`, the daily history, monthly revenue and EPS back to `first`. Each part saves what it
+        fetched as it comes, so a rerun fetches only what is missing.
         """
         revenue, eps = await self.fundamentals_history_backfill.execute(first)
         history = await self.daily_history_backfill.execute(first)
@@ -931,35 +785,19 @@ class Pipeline:
         return await self.stock_analysis_lookup.execute(stock_id)
 
     async def load_stock_news(self, stock_id: str) -> list[Article] | None:
-        """
-        A stock's page: what the article store keeps of the stock, newest first, once it holds what there is to read
-        now, the archived material information and TWSE news of the stock and, where the site may read them, the news
-        sites' articles and the board's posts as held within their freshness window. None for a stock that is not
-        listed. No embedding.
-        """
+        """The stock page's kept articles, newest first, after a read of the sources. None for a stock that is not listed."""
         return await self.stock_news_lookup.execute(stock_id)
 
-    async def refresh_article_store(self) -> ArticleRefresh:
-        """
-        The Web API's timer: the news of every stock a user holds or watches read into the article store as a stock page
-        reads it, one stock after another at the stock feed's pace, each stock's vectors brought up to date after it. It
-        answers how many stocks it read and how many articles it embedded.
-        """
-        stock_ids = await self.article_refresh_stocks.execute()
-        embedded = 0
-
-        for stock_id in stock_ids:
+    async def refresh_article_store(self) -> None:
+        """For the Web API's timer, the news of every stock a user holds or watches read into the article store and indexed."""
+        for stock_id in await self.article_refresh_stocks.execute():
             await self.stock_news_lookup.execute(stock_id)
-            embedded += await self.article_indexer.execute(stock_id)
-
-        return ArticleRefresh(len(stock_ids), embedded)
+            await self.article_indexer.execute(stock_id)
 
     async def backfill_article_store(self) -> ArticleBackfill:
         """
-        `just backfill-articles`: the announcements and TWSE news the open-data archive holds kept in the article store,
-        then the vectors of every stock the store keeps brought up to date, which also fills an index that was lost. It
-        answers the articles it added or replaced, the stocks the store keeps and the articles it embedded. Run again,
-        it adds and embeds nothing. It reaches no news site.
+        For `just backfill-articles`, keeps the open-data archive's announcements and TWSE news in the article store,
+        then brings the vectors of every stock it keeps up to date.
         """
         kept, stock_ids = await self.article_store_backfill.execute()
         embedded = 0
@@ -971,12 +809,8 @@ class Pipeline:
 
     async def backfill_company_background(self, top: PositiveInt) -> CompanyBackfill:
         """
-        `just backfill-company-background`: what a personal site reads about the companies of the monthly ranking at
-        its latest decision session, the `top` best scores first: each one's main business from MOPS, then each one's
-        annual-report sections from the document site, when they are due, one request at a time at each site's pace,
-        saved as it comes, so a rerun after a stop reads only the rest. It answers the companies asked for, the main
-        businesses read and left due, and the reports read and the companies left due. A public site reads none.
-        RankingUnavailable while the history holds no decision session.
+        For `just backfill-company-background`, reads the due main businesses and annual reports of the latest ranking's
+        `top` best stocks. RankingUnavailable without a decision session.
         """
         history = await self.ranking_history_loader.execute()
         ranking = await self.latest_ranking.execute(history, top)
@@ -987,54 +821,28 @@ class Pipeline:
         return CompanyBackfill(len(stock_ids), businesses, reports)
 
     async def load_system_writing(self) -> list[str]:
-        """
-        The Web API's timer: the stocks the site still writes for by itself now, the monthly ranking's top stocks of
-        the round that began when the latest session's daily data was held, less those whose brief is written; empty
-        once the round is done. The timer then asks for each one's brief (write_stock_brief), on the Pipeline of the
-        site's own writing, whose AI calls are counted against stock_page.system_writing.daily_ai_calls. It ranks the
-        market only at a round's first look.
-        """
+        """For the Web API's timer, the stocks the site still writes a brief for by itself now; empty once the round is done."""
         return await self.system_writing_stocks.execute()
 
-    async def refresh_world(self) -> WorldUpdate:
-        """
-        The Web API's world timer: the items the world news feeds list now read into the article store, their vectors
-        brought up to date, and the readings the world indicators' tables list kept. It answers the news items added or
-        replaced, those embedded and the readings that are new. A site that reads no world feed reads nothing.
-        """
-        return await self.world_refresh.execute()
+    async def refresh_world(self) -> None:
+        """For the Web API's world timer, reads the world news feeds and indicators into what the site holds."""
+        await self.world_refresh.execute()
 
-    async def write_world_brief(self) -> StockBrief | None:
-        """
-        The Web API's world timer, on the Pipeline of the site's own writing: the day's world brief written once it is
-        due, from world.brief.write_at of the Taipei day on, out of the held indicator readings and the kept world news
-        of its window, one AI call counted against stock_page.system_writing.daily_ai_calls. It answers the day's brief
-        as held then, or None while none is due.
-        """
+    async def write_world_brief(self) -> None:
+        """For the Web API's world timer, on the Pipeline of the site's own writing, writes the day's world brief once it is due."""
         context = await self.world_brief_context.execute()
 
         if context is None:
-            return None
+            return
 
         await self.world_brief.execute(MarketScope.WORLD.value, context)
 
-        return (await self.world_brief_lookup.execute(MarketScope.WORLD.value)).today
-
     async def load_world(self) -> WorldOverview:
-        """
-        The world page and the home page's world block: each held world indicator's newest reading beside the one
-        before it, the written world briefs of the latest days, newest first, the newest kept world news items, and
-        the Taipei time from which the site writes the day's brief, None while it writes none.
-        """
+        """The world page and the home page's world block, as WorldLookup answers them."""
         return await self.world_lookup.execute()
 
     async def load_company(self, stock_id: str) -> CompanyFacts | None:
-        """
-        A stock's page: what the site holds about the company itself. Its profile, the held items a company card may
-        cite, each with the page of MOPS or of the document site it is from, the company's card if one was claimed
-        today in Taipei, and its newest written card of an earlier day. It reads held data alone. None for a stock
-        that is not listed.
-        """
+        """The stock page's facts about the company itself. None for a stock that is not listed."""
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.manual_stocks = await self.stock_lookup.execute([stock_id], status.stats)
 
@@ -1048,22 +856,13 @@ class Pipeline:
         return CompanyFacts(profile, [fact.source for fact in context.facts], cards.today, cards.previous)
 
     async def load_stock_brief(self, stock_id: str) -> HeldBriefs:
-        """
-        A stock's page: the AI brief the site holds of the stock today in Taipei, its newest written brief of an earlier
-        day, and how many more stocks may get a new brief today.
-        """
+        """The stock page's AI brief of today in Taipei, its newest earlier one and how many more stocks may get one today."""
         return await self.stock_brief_lookup.execute(stock_id)
 
     async def write_stock_brief(self, stock_id: str) -> HeldBriefs | None:
         """
-        A stock's AI brief of today in Taipei is asked for, by a signed-in viewer or by the site's own timer: how the
-        held facts of a recent window relate to the stock's move. First a personal site reads the company's main
-        business from MOPS and its annual report's sections from the document site when either is due, and the
-        company's card is written if it has none or what it rests on changed, one AI call. The brief's news is what its
-        searches find in the article store, so the stock's vectors are brought up to date, and the card's text is the
-        brief's fact of what the company is. The site writes one brief per stock and day, so only the request that
-        claims it calls the AI, once; every other request answers what is held. Then what load_stock_brief answers.
-        None for a stock that is not listed.
+        Writes the stock's AI brief of today in Taipei, its company card first when due, for a signed-in viewer or the
+        site's own timer, then answers what load_stock_brief answers. None for a stock that is not listed.
         """
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.manual_stocks = await self.stock_lookup.execute([stock_id], status.stats)
@@ -1089,10 +888,7 @@ class Pipeline:
         return await self.stock_brief_lookup.execute(stock_id)
 
     async def count_archived_sessions(self) -> int:
-        """
-        The market overview's open-data archive: the sessions of stock closes it holds, which an open-data deployment's
-        runs wait for until they reach the daily bars the built-in strategies need.
-        """
+        """The market overview's count of the sessions of stock closes the open-data archive holds."""
         return await self.daily_close_archive.session_count()
 
     async def load_market_breadth(self) -> MarketBreadth:
@@ -1120,9 +916,8 @@ class Pipeline:
 
     async def evaluate_stock(self, stock_id: str) -> StockEvaluation:
         """
-        The stock page's technical evaluation: the owner's active strategy over the history window a run loads for it,
-        and each of its indicators at every bar of that window. Without a realtime quote, the latest price is the last
-        daily close.
+        The stock page's technical evaluation by the owner's active strategy, with each of its indicators at every bar
+        of the window. Without a realtime quote, the latest price is the last daily close.
         """
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH)
         status = PipelineStatus.read_only(Workflow.RESEARCH)
@@ -1145,27 +940,20 @@ class Pipeline:
 
     async def load_technical_settings(self) -> TechnicalSettings:
         """The settings editor's read: the owner's saved strategies and selections, the initial ones on a first read."""
-        return await self.technical_settings_loader.execute()
+        return await self.technical_settings_repository.load()
 
     async def save_technical_settings(self, settings: TechnicalSettings) -> TechnicalSettings:
-        """
-        The settings editor's save. It raises TechnicalSettingsConflictError, saving nothing, when another save came
-        after the revision `settings` carries. A run already loaded its strategy, so the next run uses these settings.
-        """
+        """The settings editor's save. TechnicalSettingsConflictError, saving nothing, when `settings` carries an old revision."""
         return await self.technical_settings_repository.save(settings)
 
     async def load_settings_form(self) -> list[SettingField]:
-        """
-        The administrator's settings form: every setting and AI prompt, with the value the files on disk set, else its
-        default. InvalidSettingsError at the parser's mark for a file that does not parse.
-        """
+        """The administrator's settings form. InvalidSettingsError for a file that does not parse."""
         return await self.settings_reader.execute()
 
     async def review_settings_form(self, changes: Sequence[SettingChange], host: str) -> list[SettingsEdit]:
         """
-        The settings form's changes, reviewed: SettingsEditError for a change the form cannot write, InvalidSettingsError
-        with the problems of new texts the app would refuse, a lockout of the editor reached at `host` included. The
-        edit of each file the changes change; nothing is written.
+        The settings form's changes as an edit of each file. SettingsEditError for a change the form cannot write,
+        InvalidSettingsError for texts the app would refuse, a lockout of the editor at `host` included.
         """
         return await self.settings_editor.execute(changes, host)
 
@@ -1173,10 +961,8 @@ class Pipeline:
         self, administrator: User, password: SecretStr | None, google_confirmation: GoogleConfirmation | None, client: str
     ) -> None:
         """
-        The administrator confirms a save of the settings: PasswordRequired, PasswordRefused or SignInThrottled without
-        their own password inside its attempt limit, or GoogleConfirmationRequired for an administrator without a
-        password and without the fresh Google authentication `google_confirmation` names, started from the session
-        that saves, which is used up here.
+        The administrator's confirmation of a settings save by their password or a fresh Google authentication.
+        PasswordRequired, PasswordRefused, SignInThrottled or GoogleConfirmationRequired otherwise.
         """
         await self.settings_confirmation.execute(administrator, password, google_confirmation, client)
 
@@ -1184,19 +970,16 @@ class Pipeline:
         self, flow: SignInFlow, confirmation: GoogleConfirmation, state: str | None, code: SecretStr | None, client: str
     ) -> None:
         """
-        The browser's return from the fresh Google authentication an administrator without a password made for one
-        settings save: the save `confirmation` names is granted to the session that started it, when Google
-        authenticated that session's administrator just now.
-        It raises GoogleSignInRefused or SignInThrottled, granting nothing.
+        The browser's return from the fresh Google authentication of one settings save, which grants that save to the
+        session that started it. GoogleSignInRefused or SignInThrottled, granting nothing.
         """
         email = await self.google_identity_check.execute(flow, state, code, client)
         await self.settings_reauthentication.execute(email, confirmation)
 
     async def confirm_editor_access(self, running: SignInOffer, saving: UserId | None) -> None:
         """
-        The settings this Pipeline's runtime runs on, before a save (`saving`, the administrator) or a reload from disk
-        (None) puts them in place, compared with the running settings' sign-in offer: InvalidSettingsError when no
-        administrator could sign in to the editor.
+        InvalidSettingsError when the settings this runtime runs on would let no administrator into the editor, before a
+        save by `saving` or a reload from disk (None) puts them in place.
         """
         candidate = await self.sign_in_options.execute()
         await self.editor_access.execute(candidate, running, saving)
@@ -1219,11 +1002,16 @@ class Pipeline:
 
     async def load_user(self, user_id: UserId) -> User | None:
         """The user as saved now, for the CLI's check before each menu option. None when unknown or deactivated."""
-        return await self.signed_in_user.execute(user_id=user_id)
+        return await self.signed_in_user.execute(user_id)
 
     async def reset_password(self, identifier: str, password: NewPassword) -> User | None:
         """The operator's reset of a password on the machine: every session of the user ends. None for an unknown name."""
-        return await self.password_reset.execute(identifier, password)
+        user = await self.user_store.find_by_name(identifier)
+
+        if user is None:
+            return None
+
+        return await self.user_change.execute(user.user_id, None, None, password)
 
     async def register(self, username: Username, email: EmailAddress, password: NewPassword, client: str) -> User:
         """Open registration: a new user with the role user. It raises RegistrationClosed or SignInThrottled."""
@@ -1237,10 +1025,8 @@ class Pipeline:
 
     async def start_google_sign_in(self, confirmation_id: str | None, session: SessionToken | None, client: str) -> GoogleRedirect:
         """
-        The start of a sign-in with Google, or with a `confirmation_id` of the fresh authentication that confirms one
-        settings save from `session`, the caller's: the flow for the browser's cookie and Google's address for it. It
-        raises GoogleSignInRefused where the site offers none or a confirmation comes without an administrator's
-        session, or SignInThrottled.
+        Starts a sign-in with Google, or with `confirmation_id` the confirmation of one settings save from `session`,
+        and answers the flow for the browser's cookie and Google's address. GoogleSignInRefused or SignInThrottled.
         """
         return await self.google_sign_in_start.execute(confirmation_id, session, client)
 
@@ -1255,8 +1041,8 @@ class Pipeline:
         return SignedIn(user, await self.session_start.execute(user))
 
     async def find_signed_in_user(self, token: SessionToken) -> User | None:
-        """Every signed-in Web request, before dependencies.py builds that user's Pipeline: the session's user, now."""
-        return await self.signed_in_user.execute(session=token)
+        """The user of an unexpired session while that user is active, else None, for every signed-in Web request."""
+        return await self.user_store.session_user(token, self.market_clock.now())
 
     async def end_session(self, token: SessionToken) -> None:
         """The Web's sign-out. Ending a session that does not exist, or ended already, changes nothing."""
@@ -1273,16 +1059,13 @@ class Pipeline:
         return await self.user_change.execute(user_id, role, status, password)
 
     def load_ai_models(self, user: User) -> AiModels:
-        """
-        My settings: each AI model the site offers with its model id, the site's default, and the model the user's runs
-        use, their choice while the site offers it, else the default.
-        """
+        """The AI models My settings shows: those the site offers, its default and the one the user's runs use."""
         return self.ai_model_lookup.execute(user)
 
     async def choose_ai_model(self, user: User, ai_model: AiProvider | None) -> AiModels:
         """
-        My settings' save of the AI model for the user's next runs, one the site offers or None for the site's default,
-        then what load_ai_models answers. It raises AiModelNotOffered, saving nothing, for a model the site does not offer.
+        My settings' save of the AI model for the user's next runs, None for the site's default, then what
+        load_ai_models answers. AiModelNotOffered, saving nothing, for a model the site does not offer.
         """
         saved = await self.ai_model_choice.execute(user, ai_model)
 

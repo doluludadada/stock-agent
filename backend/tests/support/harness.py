@@ -5,6 +5,7 @@ in dependencies.py, so a test written against CliHarness survives changes to
 use-case constructors.
 """
 
+import asyncio
 import tempfile
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager, nullcontext
@@ -52,11 +53,12 @@ from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
+from c_infrastructure.market.shioaji_quote_provider import ShioajiSession
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from c_infrastructure.system.settings_files import SettingsFiles
 from d_presentation.cli import interactive, terminal
-from d_presentation.dependencies import OwnedPorts, ProviderDependencies, Runtime, compose_runtime
+from d_presentation.dependencies import OwnedPorts, ProcessState, ProviderDependencies, Runtime, compose_runtime
 from d_presentation.live_runtime import RuntimeSwitch
 from support.fake_shioaji import FakeShioaji, connection_on
 from support.fakes import (
@@ -505,8 +507,7 @@ def build_harness(
         users_stocks=users_stocks,
         users_orders=FakeUsersOrders(lambda: [journal, *(owned.journal for owned in owners.values())]),
         broker_quotes=prices if login else None,
-        shioaji=connection,
-        shioaji_client=connection.client if connection is not None else None,
+        shioaji=ShioajiSession(connection, connection.client) if connection is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=fundamentals if config.audience.mops else None,
         company_basics_provider=company_basics if config.audience.mops else None,
@@ -517,13 +518,12 @@ def build_harness(
         conversation_repository=conversations,
         notification_provider=None,
         platform_provider=chat_platform,
-        settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, running=config, logger=logger),
+        settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, logger=logger),
         user_store=users,
-        attempt_log=MemoryAttemptLog(),
         real_broker=real_broker if sinopac else None,
         ordering_switch=FakeOrderingSwitch(config.features, config.shioaji.server),
         owned_ports=owned_ports,
-        process_started=now - timedelta(hours=1),
+        process=ProcessState(logger, MemoryAttemptLog(), asyncio.Lock(), started_at=now - timedelta(hours=1)),
     )
     runtime = compose_runtime(config, logger, clock, dependencies)
     runtime.become_current()
@@ -589,9 +589,7 @@ def runtime_for(harness: CliHarness, config: AppConfig) -> Runtime:
     these settings' ordering from here on, for the orders of every runtime of the harness.
     """
     harness.dependencies.ordering_switch.features = config.features
-    settings_files = SettingsFiles(
-        project_root=harness.settings_root, max_bytes=262_144, backups_kept=3, running=config, logger=harness.logger
-    )
+    settings_files = SettingsFiles(project_root=harness.settings_root, max_bytes=262_144, backups_kept=3, logger=harness.logger)
     return compose_runtime(config, harness.logger, harness.clock, replace(harness.dependencies, settings_files=settings_files))
 
 

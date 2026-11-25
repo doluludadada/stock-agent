@@ -1,5 +1,7 @@
 import { randomHex } from '@/shared/lib/random-id'
-import { inputOf, type Input, type SettingChange, type SettingField } from './form'
+import type { components } from './schema.gen'
+
+type SettingChange = components['schemas']['SettingChange']
 
 const STORAGE_KEY = 'stock-agent.settings-confirmation'
 const CONFIRMATION_ID_DIGITS = 32
@@ -60,14 +62,4 @@ export function takePendingSave(): PendingSave | null {
 
 function isChange(value: unknown): value is SettingChange {
   return typeof value === 'object' && value !== null && typeof Reflect.get(value, 'path') === 'string' && 'value' in value
-}
-
-/** The form's inputs that show the waiting changes again, so nothing typed before the trip to Google is lost. */
-export function inputsOf(fields: readonly SettingField[], changes: readonly SettingChange[]): Record<string, Input> {
-  const inputs: Record<string, Input> = {}
-  for (const change of changes) {
-    const field = fields.find((item) => item.path === change.path)
-    if (field) inputs[change.path] = inputOf({ ...field, value: change.value })
-  }
-  return inputs
 }

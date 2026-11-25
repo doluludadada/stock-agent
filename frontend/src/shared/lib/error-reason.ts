@@ -40,3 +40,26 @@ export function useErrorReason(): (error: unknown) => string {
     [t],
   )
 }
+
+/** A follow's own words for the refusals a run's follow and the ranking's share; the ranking words `nothing_to_follow` per account. */
+const FOLLOW_REFUSALS = {
+  outside_follow_window: 'runs:follow.refused.window',
+  realtime_quotes_unavailable: 'runs:follow.refused.quotes',
+  run_in_progress: 'runs:busy',
+} as const satisfies Partial<Record<ErrorCode, string>>
+
+const hasFollowWords = (code: ErrorCode): code is keyof typeof FOLLOW_REFUSALS => Object.hasOwn(FOLLOW_REFUSALS, code)
+
+/** Why a follow did not start, in the reader's language; `upToDate` is what the page says when nothing is left to follow. */
+export function useFollowRefusal(): (error: unknown, upToDate: string) => string {
+  const { t } = useTranslation()
+  const reason = useErrorReason()
+  return useCallback(
+    (error: unknown, upToDate: string) => {
+      const code = isApiError(error) ? error.code : null
+      if (code === 'nothing_to_follow') return upToDate
+      return code && hasFollowWords(code) ? t(FOLLOW_REFUSALS[code]) : t('runs:follow.failed', { reason: reason(error) })
+    },
+    [t, reason],
+  )
+}

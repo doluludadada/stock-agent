@@ -229,7 +229,10 @@ async def test_a_personal_deployment_without_a_shioaji_login_reads_its_history_f
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str]
 ) -> None:
     config = deployment(tmp_path, monkeypatch, Audience.PERSONAL)
-    config.shioaji = ShioajiConfig(_env_file=None, **config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
+    config.shioaji = ShioajiConfig(
+        _env_file=None,
+        **config.shioaji.model_dump(include={"server", "poll_interval_seconds", "max_polls", "simulation_initial_cash"}),
+    )
     cached = [
         Ohlcv(ts=close_of(date(2026, 10, day)), open=1.0, high=1.0, low=1.0, close=1.0, volume=1, change=0.0) for day in (28, 29)
     ]

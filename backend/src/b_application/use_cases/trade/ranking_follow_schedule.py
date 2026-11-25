@@ -7,9 +7,9 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.ordering_switch import IOrderingSwitch
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.rules.trading.follow import FollowAccount, FollowSchedule
 from a_domain.types.enums import ExecutionProvider, Workflow
 from b_application.config.app_config import AppConfig
+from b_application.schemas.trade import RankingFollowSettings
 
 
 class RankingFollowSchedule:
@@ -45,7 +45,7 @@ class RankingFollowSchedule:
         self._account_rule = config.follow_account_rule()
         self._schedule_rule = config.follow_schedule_rule()
 
-    async def execute(self, user: User) -> tuple[FollowAccount, FollowSchedule, list[SystemStats]]:
+    async def execute(self, user: User) -> RankingFollowSettings:
         links = {broker: account.link() for broker, account in self._accounts.items() if broker.real}
         follow_account = self._account_rule.apply(user, links, await self._ordering_switch.read())
         follows: list[SystemStats] = []
@@ -65,8 +65,6 @@ class RankingFollowSchedule:
             user.ranking_follow_time, sessions, follows, now, self._market_clock.trading_phase(), follow_account
         )
 
-        return (
-            follow_account,
-            schedule,
-            [run for run in follows if run.ranking_formula is not None and run.ranking_decided_on is not None],
-        )
+        decided = [run for run in follows if run.ranking_formula is not None and run.ranking_decided_on is not None]
+
+        return RankingFollowSettings(follow_account, schedule, decided)

@@ -26,9 +26,8 @@ def harness_showing(sinopac: bool = False, **visibilities: FeatureVisibility) ->
     return harness
 
 
-def test_the_features_settings_are_the_feature_registry_and_the_shipped_file_sets_their_defaults() -> None:
+def test_the_features_settings_are_the_feature_registry() -> None:
     assert list(FeaturesConfig.model_fields) == [feature.value for feature in Feature]
-    assert shipped_config().features == FeaturesConfig()
 
 
 def test_the_shipped_site_shows_a_user_the_research_pages_and_an_administrator_everything() -> None:

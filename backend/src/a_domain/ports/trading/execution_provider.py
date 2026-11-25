@@ -7,7 +7,7 @@ from a_domain.model.trading.account import Account, BrokerageStatement, Position
 from a_domain.model.trading.order import Order
 from a_domain.rules.trading.execution import ExchangeOrder
 from a_domain.rules.trading.order_rule import BrokerLink
-from a_domain.types.enums import LotKind, RejectReason
+from a_domain.types.enums import RejectReason
 
 type SendRefusal = Callable[[], Awaitable[tuple[RejectReason, str] | None]]
 """Why an exchange order may not go out at this moment, or None: what a broker asks right before it sends each one."""
@@ -84,11 +84,10 @@ class ISimulatedExecutionProvider(IExecutionProvider, Protocol):
         ...
 
 
-class IBrokerExecutionProvider[Contract, Trade](IExecutionProvider, Protocol):
+class IBrokerExecutionProvider[Contract](IExecutionProvider, Protocol):
     """
-    A real broker reached through its SDK client. Contract is the SDK's stock contract and Trade its record of one
-    exchange order. An order goes to the exchange as one exchange order per lot part. A failed call of the SDK says
-    only the error's type and the server's status.
+    A real broker reached through its SDK client. Contract is the SDK's stock contract. An order goes to the exchange as
+    one exchange order per lot part. A failed call of the SDK says only the error's type and the server's status.
     """
 
     async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
@@ -105,14 +104,6 @@ class IBrokerExecutionProvider[Contract, Trade](IExecutionProvider, Protocol):
         Sends the order as one exchange order per lot part, in turn, asking `refusal_now` right before each, and records
         what each part dealt on it. Stops at a part still working and at a refusal. Returns the report of every part it
         sent, and the refusal that stopped it before a part, if one did. `stop` as place_order says.
-        """
-        ...
-
-    async def place(self, contract: Contract, order: Order, lot: LotKind, shares: int, index: int, stop: Event) -> Trade | None:
-        """
-        Places one exchange order. When the confirmation is lost, looks for it in the account's orders, or answers None
-        while the broker does not list it within the time it allows the lookups or once `stop` is set: it may still
-        have reached the exchange.
         """
         ...
 

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import override
@@ -10,17 +9,10 @@ from uuid import uuid4
 from pydantic import TypeAdapter
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.system.settings_files import ISettingsFiles, SettingsAuditEntry, SettingsBackup, SettingsDocument, SettingsProblem
+from a_domain.ports.system.settings_files import ISettingsFiles, SettingsAuditEntry, SettingsBackup, SettingsDocument
 from a_domain.types.enums import SettingsFile
 from a_domain.types.errors import SettingsConflictError, SettingsEditError, SettingsFileMissing, SettingsFileRefused
-from b_application.config.app_config import AppConfig
-from b_application.config.settings_loader import (
-    InvalidSettingsError,
-    settings_revision,
-    settings_texts,
-    startup_settings,
-    validate_editor_reachable,
-)
+from b_application.config.settings_loader import settings_revision
 
 
 class SettingsFiles(ISettingsFiles):
@@ -30,16 +22,14 @@ class SettingsFiles(ISettingsFiles):
     the original with the original's permissions, flushes it to disk and renames it over the original, so a crash
     leaves the old or the new file whole. Each save appends one line to .settings-admin/audit.jsonl before it writes,
     so an audit that cannot be written stops the save with the file and the running app as they were. The admin folder
-    is outside config/ and the frontend, created owner-only (0700), and keeps the latest `backups_kept` backups. A check
-    runs against `running`, the settings of the runtime the adapter belongs to.
+    is outside config/ and the frontend, created owner-only (0700), and keeps the latest `backups_kept` backups.
 
     A file that is a symlink, or that resolves outside config/, is refused. The new text is written byte for byte;
     nothing in a file is ever executed (YAML is read with the safe loader only).
     """
 
-    def __init__(self, project_root: Path, max_bytes: int, backups_kept: int, running: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(self, project_root: Path, max_bytes: int, backups_kept: int, logger: ILoggingProvider) -> None:
         self._project_root = project_root
-        self._running = running
         self._config_folder = (project_root / "config").resolve()
         self._admin_folder = project_root / ".settings-admin"
         self._max_bytes = max_bytes
@@ -89,17 +79,6 @@ class SettingsFiles(ISettingsFiles):
     @override
     def built_in_strategy_ids(self) -> list[str]:
         return sorted(path.stem for path in (self._project_root / "config" / "strategies").glob("*.json"))
-
-    @override
-    def check(self, candidates: Mapping[SettingsFile, str], host: str, unsettled: int) -> tuple[SettingsProblem, ...]:
-        texts = settings_texts(self._project_root, candidates)
-
-        try:
-            validate_editor_reachable(startup_settings(self._project_root, texts, self._running, unsettled=unsettled), texts, host)
-        except InvalidSettingsError as error:
-            return tuple(error.problems)
-
-        return ()
 
 
 async def keep_backup(document: SettingsDocument, admin_folder: Path, backups_kept: int) -> SettingsBackup:

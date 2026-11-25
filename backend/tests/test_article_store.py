@@ -29,7 +29,7 @@ from a_domain.rules.ai.stock_brief import BriefSearch
 from a_domain.types.enums import Audience, BriefSourceKind, InformationSource, MarketType, Role, WatchlistType
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
-from b_application.schemas.collect import ArticleBackfill, ArticleRefresh
+from b_application.schemas.collect import ArticleBackfill
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockPosition
 from c_infrastructure.database.repositories.article_index import SqlArticleIndex
@@ -297,11 +297,10 @@ async def test_the_timer_reads_the_stocks_users_hold_or_watch_each_once_up_to_it
             replace(article(REVENUE, InformationSource.NEWS_MEDIA, MARKET_OPEN, f"https://news.example/{stock_id}"), stock_id=stock_id)
         ]
 
-    first = await harness.runtime.signed_out.refresh_article_store()
-    again = await harness.runtime.signed_out.refresh_article_store()
+    await harness.runtime.signed_out.refresh_article_store()
+    await harness.runtime.signed_out.refresh_article_store()
 
     expected = ["1101", "2317", "2330"]
-    assert (first, again) == (ArticleRefresh(stocks=3, embedded=3), ArticleRefresh(stocks=3, embedded=0))
     assert harness.news.requested == expected
     assert await harness.articles.stock_ids() == expected
     assert harness.embedder.embedded == [REVENUE] * 3

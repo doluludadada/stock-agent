@@ -23,16 +23,19 @@ CHILD_TABLES = (TechnicalFormulaNodeDTO, TechnicalRuleDTO, TechnicalIndicatorDTO
 
 class SqlTechnicalSettingsRepository(ITechnicalSettingsRepository):
     """
-    One owner's technical settings in ordinary SQL tables, through a connector bound to that
-    owner. A save replaces the owner's rows in the same transaction that checks and raises the revision.
+    One owner's technical settings in ordinary SQL tables, through a connector bound to that owner, and `initial`, the
+    settings an owner without any gets. A save replaces the owner's rows in the same transaction that checks and raises
+    the revision.
     """
 
-    def __init__(self, db: DatabaseConnector) -> None:
+    def __init__(self, db: DatabaseConnector, initial: TechnicalSettings) -> None:
         self._db = db
+        self._initial = initial
 
     @override
-    async def load(self, initial: TechnicalSettings) -> TechnicalSettings:
+    async def load(self) -> TechnicalSettings:
         owner_id = self._db.owner_id
+        initial = self._initial
 
         async with self._db.owner_session() as session:
             if await session.get(TechnicalSettingsDTO, owner_id) is None:

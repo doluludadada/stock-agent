@@ -13,7 +13,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import ISimulatedExecutionProvider, SendRefusal
 from a_domain.rules.trading.execution import FillRule, OrderAcceptanceRule
 from a_domain.rules.trading.order_rule import BrokerLink
-from a_domain.types.enums import ExecutionProvider, TimeInForce, TradeAction
+from a_domain.types.enums import ExecutionProvider, TradeAction
 from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockCash, MockPosition
@@ -27,7 +27,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
     Its book is the account only: cash (mock_cash) and positions (mock_positions). It keeps no
     order table. The app records every order it sends in the `orders` table, the same audit trail
-    a live provider's results land in, and the mock never holds a working order (see ROD below),
+    a live provider's results land in, and the mock never holds a working order (every order is IOC),
     so it has no order state of its own to keep. connect seeds the book, and every account read
     calls it, so the book is seeded on first use.
 
@@ -37,14 +37,9 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     limit at the market's price. It fills at most `mock_trading.max_fill_quantity` shares per order at that price
     (unset: any quantity). Fees, tax and realized PnL come from FillRule.
 
-    Before acceptance (REJECTED): what OrderAcceptanceRule refuses, which is a MARKET order, ROD, a BUY
-    without cash for the whole quantity plus fee, and a SELL of shares the account does not hold.
-    After acceptance, by time in force:
-    - IOC fills what the market can take now and cancels the remainder.
-    - FOK fills the whole quantity now, or cancels all of it.
-    ROD never gets here: its remainder would stay working until the close, but nothing could ever
-    fill it (no feed) and nothing in the app reconciles working orders.
-    An unexpected exception FAILS the order and leaves the book untouched.
+    Before acceptance (REJECTED): what OrderAcceptanceRule refuses, which is a BUY without cash for the whole quantity
+    plus fee and a SELL of shares the account does not hold. After acceptance, an IOC order (OrderRule) fills what the
+    market can take now and cancels the remainder. An unexpected exception FAILS the order and leaves the book untouched.
     """
 
     def __init__(self, db: DatabaseConnector, config: AppConfig, market_clock: IMarketClock, logger: ILoggingProvider) -> None:
@@ -150,12 +145,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
     @override
     async def fill(self, order: Order, account: Account, now: datetime) -> None:
-        available = order.quantity if self._max_fill_quantity is None else min(order.quantity, self._max_fill_quantity)
-        quantity = 0 if order.time_in_force == TimeInForce.FOK and available < order.quantity else available
-
-        if quantity == 0:
-            return
-
+        quantity = order.quantity if self._max_fill_quantity is None else min(order.quantity, self._max_fill_quantity)
         price = self._market_price_rule.apply(order.action, order.stock_id, order.price_at_signal)
 
         cost, realized_pnl = self._fill_rule.apply(order, quantity, price, account.position_for(order.stock_id), now=now)

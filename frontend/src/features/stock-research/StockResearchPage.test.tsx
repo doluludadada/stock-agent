@@ -53,7 +53,7 @@ function renderStockPage() {
   render(
     wrap(
       <>
-        <StockResearchPage code="2330" strategyName={(strategy) => strategy.name} ruleName={(_strategy, name) => name} />
+        <StockResearchPage code="2330" />
         <Address />
       </>,
     ),
@@ -104,7 +104,7 @@ describe('the stock page', () => {
       return json({})
     })
     vi.stubGlobal('fetch', fetch)
-    render(wrap(<StockResearchPage code="4523" strategyName={(strategy) => strategy.name} ruleName={(_strategy, name) => name} />))
+    render(wrap(<StockResearchPage code="4523" />))
 
     expect(await screen.findByText('No daily bars for this stock yet.')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Yung Chang' })).toBeInTheDocument()
@@ -125,7 +125,7 @@ describe('the stock page', () => {
         return new Response(JSON.stringify({ detail: 'not held', code: 'not_found' }), { status: 404 })
       }),
     )
-    render(wrap(<StockResearchPage code="2330" strategyName={(strategy) => strategy.name} ruleName={(_strategy, name) => name} />))
+    render(wrap(<StockResearchPage code="2330" />))
 
     await screen.findByText('No brief has been written today')
     await screen.findByRole('region', { name: 'Ranking score' })
@@ -145,7 +145,7 @@ describe('the stock page', () => {
       <I18nextProvider i18n={initI18n('en')}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
           <MemoryRouter>
-            <StockResearchPage code="23-30" strategyName={(strategy) => strategy.name} ruleName={(_strategy, name) => name} />
+            <StockResearchPage code="23-30" />
           </MemoryRouter>
         </QueryClientProvider>
       </I18nextProvider>,

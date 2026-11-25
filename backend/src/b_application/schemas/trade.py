@@ -11,7 +11,7 @@ from a_domain.types.enums import FollowRefusal
 
 @dataclass(frozen=True)
 class RankingFollowSettings:
-    """A user's ranking follow as Pipeline.load_follow_schedule returns it: RankingFollowSchedule's whole answer."""
+    """A user's ranking follow as RankingFollowSchedule answers it and Pipeline.load_follow_schedule returns it."""
 
     account: FollowAccount
     """The user's follow account, whether a ranking follow may order there now, and the accounts the site offers."""

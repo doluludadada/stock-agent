@@ -3,10 +3,12 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { isApiError, useSession } from '@/shared/api'
+import { paths } from '@/shared/config/paths'
 import { Button } from '@/shared/ui/button'
 import { Field } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 import { PasswordInput } from '@/shared/ui/password-input'
+import { useAuthLinks } from '@/shared/ui/require-sign-in'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useAuthStatus, useRegister, useSetUp, useSignIn } from './api'
@@ -42,9 +44,9 @@ function signInProblem(error: unknown): SignInProblem {
 }
 
 /** Sign in with the username or the email; `onDone` goes back to the page that asked for it. */
-export function SignInScreen({ registerHref, onDone }: { registerHref: string; onDone: () => void }) {
+export function SignInScreen({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation('auth')
-  const status = useAuthStatus()
+  const { register } = useAuthLinks()
   const current = useSession()
   const signIn = useSignIn()
   const [identifier, setIdentifier] = useState('')
@@ -63,12 +65,12 @@ export function SignInScreen({ registerHref, onDone }: { registerHref: string; o
     <AuthFrame
       title={t('signIn.title')}
       footer={
-        status.data?.registration_open === false ? (
+        register === null ? (
           t('signIn.closed')
         ) : (
           <>
             {t('signIn.noAccount')}{' '}
-            <Link to={registerHref} className={linkClass}>
+            <Link to={register} className={linkClass}>
               {t('signIn.registerLink')}
             </Link>
           </>
@@ -103,7 +105,7 @@ export function SignInScreen({ registerHref, onDone }: { registerHref: string; o
 }
 
 /** A new user, signed in at once, or the note that registration is closed. */
-export function RegisterScreen({ signInHref, onDone }: { signInHref: string; onDone: () => void }) {
+export function RegisterScreen({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation('auth')
   const status = useAuthStatus()
   const register = useRegister()
@@ -116,7 +118,7 @@ export function RegisterScreen({ signInHref, onDone }: { signInHref: string; onD
         description={t('register.closedDescription')}
         action={
           <Button asChild variant="outline">
-            <Link to={signInHref}>{t('register.signInLink')}</Link>
+            <Link to={paths.signIn}>{t('register.signInLink')}</Link>
           </Button>
         }
       />
@@ -128,7 +130,7 @@ export function RegisterScreen({ signInHref, onDone }: { signInHref: string; onD
       footer={
         <>
           {t('register.haveAccount')}{' '}
-          <Link to={signInHref} className={linkClass}>
+          <Link to={paths.signIn} className={linkClass}>
             {t('register.signInLink')}
           </Link>
         </>

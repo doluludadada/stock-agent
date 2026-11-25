@@ -4,11 +4,11 @@ import { useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError, useAudience, type Order, type Schemas } from '@/shared/api'
+import { useAudience, type Order, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
-import { useErrorReason } from '@/shared/lib/error-reason'
+import { useFollowRefusal } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { DataTable, type Column } from '@/shared/ui/data-table'
@@ -75,7 +75,7 @@ interface FollowActionProps extends Omit<FollowPanelProps, 'follow'> {
 
 function FollowAction({ runId, follow, pricing, quoted, decisions, names }: FollowActionProps) {
   const { t } = useTranslation('runs')
-  const reason = useErrorReason()
+  const refusal = useFollowRefusal()
   const format = useFormat()
   const navigate = useNavigate()
   const start = useFollowRun(runId)
@@ -85,14 +85,6 @@ function FollowAction({ runId, follow, pricing, quoted, decisions, names }: Foll
   const open = decisions ? openDecisions(follow, decisions) : []
   const ready = quoted && follow.refusal === null && open.length > 0
 
-  const refusalText = (error: Error): string => {
-    const code = isApiError(error) ? error.code : null
-    if (code === 'nothing_to_follow') return t('follow.refused.nothing')
-    if (code === 'outside_follow_window') return t('follow.refused.window')
-    if (code === 'realtime_quotes_unavailable') return t('follow.refused.quotes')
-    if (code === 'run_in_progress') return t('busy')
-    return t('follow.failed', { reason: reason(error) })
-  }
   const confirm = () => {
     setConfirming(false)
     start.mutate(undefined, {
@@ -100,7 +92,7 @@ function FollowAction({ runId, follow, pricing, quoted, decisions, names }: Foll
         toast.success(t('follow.started'))
         navigate(paths.run(accepted.run_id))
       },
-      onError: (error) => toast.error(refusalText(error)),
+      onError: (error) => toast.error(refusal(error, t('follow.refused.nothing'))),
     })
   }
 

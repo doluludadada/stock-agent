@@ -192,6 +192,34 @@ const common = {
     title: 'Something went wrong on this page',
     description: 'Go back to the home page and try again.',
   },
+  settingsSave: {
+    password: {
+      title: 'Save the settings?',
+      description: 'Enter your password to confirm. The server runs on the new settings at once.',
+      label: 'Your password',
+      wrong: 'The password is wrong. Nothing was saved.',
+      throttledMinutes: 'Too many wrong passwords. Try again in {{minutes}} min {{seconds}} s.',
+      throttledSeconds: 'Too many wrong passwords. Try again in {{seconds}} s.',
+      failed: 'The save did not go through: {{reason}}',
+      confirm: 'Save and apply',
+      saving: 'Saving…',
+      cancel: 'Cancel',
+      show: 'Show password',
+      hide: 'Hide password',
+    },
+    google: {
+      title: 'Save the settings?',
+      description: 'Your account has no password, so you confirm by signing in to Google again. You come back here and the save is sent at once. The server then runs on the new settings.',
+      confirm: 'Confirm with Google',
+      cancel: 'Cancel',
+    },
+    reason: {
+      administratorsOnly: 'This account is no longer an administrator.',
+      passwordRequired: 'The server needs your password for this.',
+      fileRefused: 'The server does not read or write this settings file: it is a link, lies outside the settings folder, or is too large.',
+      fileMissing: 'The server has no such settings file.',
+    },
+  },
 }
 
 export default common

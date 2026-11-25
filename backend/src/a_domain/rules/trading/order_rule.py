@@ -27,63 +27,6 @@ from a_domain.types.ids import RunId
 from a_domain.types.values import PositiveFiniteFloat
 
 
-@dataclass(frozen=True)
-class OrderPriceRule:
-    """
-    Why the decision's price may not price an order at `now`, or None. A realtime quote counts while it is at most
-    `price_freshness` old, measured to `now`, so a quote that was fresh when fetched but aged while the run analysed
-    other stocks is refused. An official close counts only as the close of the last closed session (`last_close`, the
-    time a daily bar of that session is stamped with): an older one is no longer the newest price, and a newer one
-    does not exist yet.
-    """
-
-    pricing: OrderPricing
-    price_freshness: DataFreshnessRule
-
-    def apply(self, signal: TradeSignal, now: datetime, last_close: datetime) -> tuple[RejectReason, str] | None:
-        match self.pricing:
-            case OrderPricing.REALTIME_QUOTE:
-                fresh = self.price_freshness.apply(signal.price_observed_at, now)
-                limit = f"the limit is {int(self.price_freshness.max_lag.total_seconds() // 60)} min"
-            case OrderPricing.OFFICIAL_CLOSE:
-                fresh = signal.price_observed_at >= last_close
-                limit = f"only the close of {last_close:%Y-%m-%d} prices an order now"
-
-        if fresh:
-            return None
-
-        age_minutes = int((now - signal.price_observed_at).total_seconds() // 60)
-        detail = (
-            f"price {signal.price_at_signal:.2f} was quoted at {signal.price_observed_at:%Y-%m-%d %H:%M}, "
-            f"{age_minutes} min before {now:%H:%M}; {limit}"
-        )
-        return RejectReason.STALE_PRICE, detail
-
-
-@dataclass(frozen=True)
-class OrderGateRule:
-    """
-    Why the app may not send an order for this decision now, or None, whichever broker takes it. The gates run per
-    decision right before submission, against one reading of the clock: the trading phase the order pricing allows (a
-    realtime quote prices an order in continuous trading only, since the opening and closing call auctions take ROD
-    only and the app sends IOC; an official close prices a mock order only while no session trades), and the price's
-    age (OrderPriceRule). Which broker may take the order is BrokerAccessRule's, checked at the send itself.
-    """
-
-    price_rule: OrderPriceRule
-
-    def apply(self, signal: TradeSignal, now: datetime, phase: TradingPhase, last_close: datetime) -> tuple[RejectReason, str] | None:
-        pricing = self.price_rule.pricing
-
-        if phase != pricing.trading_phase:
-            detail = (
-                f"{now:%a %Y-%m-%d %H:%M} falls in the market's {phase} phase; {pricing} orders go in its {pricing.trading_phase} only"
-            )
-            return pricing.outside_phase, detail
-
-        return self.price_rule.apply(signal, now, last_close)
-
-
 @dataclass(frozen=True, kw_only=True)
 class BrokerLink:
     """
@@ -122,7 +65,7 @@ def may_have_bought(buys: Sequence[Order]) -> float:
     What `buys`, BUYs on a real broker, may have bought at their limits: all of one while its outcome is open or unknown
     (PENDING, SUBMITTED, UNCONFIRMED, FAILED), what filled once it ended, and nothing of one refused.
     """
-    return math.fsum((buy.limit_price or 0) * (buy.filled_quantity if buy.status.fill_final else buy.quantity) for buy in buys)
+    return math.fsum(buy.require_limit_price() * (buy.filled_quantity if buy.status.fill_final else buy.quantity) for buy in buys)
 
 
 @dataclass(frozen=True)
@@ -136,9 +79,8 @@ class BuyLimitRule:
     BUY sized on its risk budget takes analysis.risk_per_trade_pct over analysis.stop_loss_pct of the equity, so both
     catch a run that buys far more than that, not a normal one. An earlier BUY counts at what it may have bought
     (may_have_bought). The journal holds each order before it is sent, so the earlier BUYs are every one that may have
-    reached the broker. A BUY with no limit price, a MARKET order, has no value to hold to them, and one of a run that
-    valued no account has no limits to be held to, so both are refused. A SELL is never held to them: it sells only
-    shares the account holds.
+    reached the broker. A BUY of a run that valued no account has no limits to be held to, so it is refused. A SELL is
+    never held to them: it sells only shares the account holds.
     """
 
     max_order_equity_pct: PositiveFiniteFloat
@@ -148,15 +90,11 @@ class BuyLimitRule:
         if order.action != TradeAction.BUY:
             return None
 
-        limits = "trading.max_order_equity_pct and trading.max_daily_buy_equity_pct"
-
-        if order.limit_price is None:
-            return RejectReason.ORDER_VALUE_LIMIT, f"has no limit price to value against {limits}"
-
         if equity is None:
+            limits = "trading.max_order_equity_pct and trading.max_daily_buy_equity_pct"
             return RejectReason.ORDER_VALUE_LIMIT, f"its run valued no account to derive {limits} from"
 
-        value, order_limit = order.limit_price * order.quantity, order_value_limit(self, equity)
+        value, order_limit = order.require_limit_price() * order.quantity, order_value_limit(self, equity)
 
         if value > order_limit:
             share = f"trading.max_order_equity_pct {self.max_order_equity_pct:.0%} of the equity {equity:,.0f}"
@@ -361,8 +299,13 @@ class BrokerAccessRule:
 @dataclass(frozen=True)
 class OrderRule:
     """
-    Turns a BUY or SELL decision into the order the app may send now, or into a REJECTED order that says why not
-    (OrderGateRule).
+    Turns a BUY or SELL decision into the order the app may send now (pending_order), or into a REJECTED order that says
+    why not, against one reading of the clock right before submission. A realtime quote prices an order in continuous
+    trading only, since the call auctions take ROD only and the app sends IOC, and while it is at most `price_freshness`
+    old, measured to `now`, so a quote that aged while the run analysed other stocks is refused. An official close
+    prices a mock order only while no session trades, and only as the close of the last closed session (`last_close`,
+    the time a daily bar of that session is stamped with). Which broker may take the order is BrokerAccessRule's,
+    checked at the send itself.
 
     Every order is a marketable LIMIT with time in force IOC:
     - LIMIT at most trading.limit_offset_pct past the price the decision saw, on the exchange's tick grid
@@ -373,34 +316,59 @@ class OrderRule:
       working orders (no cancel, no expiry, no reconciliation), so ROD is out: its remainder could fill
       hours later at a price no decision saw. FOK is out because sizing gives a maximum, not a target:
       a partial BUY is still a valid smaller position and a partial stop-loss SELL still cuts the loss.
-    - IOC trades only in continuous trading, so an order outside it is REJECTED as MARKET_CLOSED and never sent.
     """
 
-    gate_rule: OrderGateRule
+    pricing: OrderPricing
+    price_freshness: DataFreshnessRule
     limit_price_rule: LimitPriceRule
 
     def apply(self, signal: TradeSignal, run_id: RunId, now: datetime, phase: TradingPhase, last_close: datetime) -> Order:
-        action = signal.action
+        order, pricing = pending_order(signal, run_id, self.limit_price_rule, now), self.pricing
 
-        if action == TradeAction.HOLD:
-            raise ValueError("HOLD is not an order")
+        if phase != pricing.trading_phase:
+            detail = (
+                f"{now:%a %Y-%m-%d %H:%M} falls in the market's {phase} phase; {pricing} orders go in its {pricing.trading_phase} only"
+            )
+            order.reject(pricing.outside_phase, detail, now=now)
+            return order
 
-        order = Order(
-            run_id=run_id,
-            decision_id=signal.decision_id,
-            stock_id=signal.stock_id,
-            action=action,
-            order_type=OrderType.LIMIT,
-            time_in_force=TimeInForce.IOC,
-            quantity=signal.quantity,
-            limit_price=self.limit_price_rule.apply(action, signal.stock_id, signal.price_at_signal),
-            price_at_signal=signal.price_at_signal,
-            created_at=now,
-            updated_at=now,
+        match pricing:
+            case OrderPricing.REALTIME_QUOTE:
+                fresh = self.price_freshness.apply(signal.price_observed_at, now)
+                limit = f"the limit is {int(self.price_freshness.max_lag.total_seconds() // 60)} min"
+            case OrderPricing.OFFICIAL_CLOSE:
+                fresh = signal.price_observed_at >= last_close
+                limit = f"only the close of {last_close:%Y-%m-%d} prices an order now"
+
+        if fresh:
+            return order
+
+        age_minutes = int((now - signal.price_observed_at).total_seconds() // 60)
+        detail = (
+            f"price {signal.price_at_signal:.2f} was quoted at {signal.price_observed_at:%Y-%m-%d %H:%M}, "
+            f"{age_minutes} min before {now:%H:%M}; {limit}"
         )
-        refusal = self.gate_rule.apply(signal, now, phase, last_close)
-
-        if refusal is not None:
-            order.reject(*refusal, now=now)
-
+        order.reject(RejectReason.STALE_PRICE, detail, now=now)
         return order
+
+
+def pending_order(signal: TradeSignal, run_id: RunId, limit_price_rule: LimitPriceRule, now: datetime) -> Order:
+    """The PENDING order of the BUY or SELL `signal` decided, limited by `limit_price_rule`. Raises for a HOLD."""
+    action = signal.action
+
+    if action == TradeAction.HOLD:
+        raise ValueError("HOLD is not an order")
+
+    return Order(
+        run_id=run_id,
+        decision_id=signal.decision_id,
+        stock_id=signal.stock_id,
+        action=action,
+        order_type=OrderType.LIMIT,
+        time_in_force=TimeInForce.IOC,
+        quantity=signal.quantity,
+        limit_price=limit_price_rule.apply(action, signal.stock_id, signal.price_at_signal),
+        price_at_signal=signal.price_at_signal,
+        created_at=now,
+        updated_at=now,
+    )

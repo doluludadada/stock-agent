@@ -1,5 +1,5 @@
 import { ChevronDown, LogIn, LogOut, type LucideIcon } from 'lucide-react'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { useSession } from '@/shared/api'
@@ -38,12 +38,10 @@ export function UserMenu({ links: pages, onSignedOut }: { links: readonly MenuLi
   const { t } = useTranslation('auth')
   const current = useSession()
   const links = useAuthLinks()
-  const location = useLocation()
   const signOut = useSignOut()
 
   if (current.status === 'checking') return <Skeleton className="size-9 rounded-full" />
   if (current.status === 'signedOut') {
-    if (!links) return null
     return (
       <div className="flex items-center gap-1.5">
         {links.register && (
@@ -52,7 +50,7 @@ export function UserMenu({ links: pages, onSignedOut }: { links: readonly MenuLi
           </Button>
         )}
         <Button asChild size="sm">
-          <Link to={links.signIn(`${location.pathname}${location.search}`)}>
+          <Link to={links.signIn}>
             <LogIn aria-hidden />
             {t('common:auth.signIn')}
           </Link>

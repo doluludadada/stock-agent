@@ -193,7 +193,7 @@ async def test_a_buy_on_sinopac_is_refused_while_an_earlier_buy_of_the_stock_a_s
     """In a CLI session, or in the Web API before its timer ended the run, the BUY a stopped process left is still SUBMITTED."""
     client = FakeShioaji()
     harness = sinopac_site(client)
-    started = harness.dependencies.process_started
+    started = harness.dependencies.process.started_at
     left = unconfirmed_buy(harness, ended=False, sent_at=started - timedelta(minutes=5), submitted=True)
 
     status = await harness.runtime.pipeline_for(ADMINISTRATOR, ExecutionProvider.SHIOAJI).buy_manually(analysed_stock(), 400)
@@ -301,7 +301,7 @@ async def test_a_listed_order_of_the_tag_and_stock_that_differs_in_another_field
 async def test_the_timer_ends_a_sinopac_run_an_earlier_process_left_and_settles_its_open_orders_but_never_this_processs_runs() -> None:
     client = FakeShioaji()
     harness = sinopac_site(client)
-    started = harness.dependencies.process_started
+    started = harness.dependencies.process.started_at
     left = unconfirmed_buy(harness, ended=False, sent_at=started - timedelta(minutes=5), submitted=True)
     running = unconfirmed_buy(harness, ended=False, sent_at=started + timedelta(minutes=5), submitted=True)
     listed_at_sinopac(client, left, Report(Status.Filled, ((100.0, 1),)))
@@ -324,7 +324,7 @@ async def test_a_part_sent_at_the_days_limit_up_is_settled_also_after_its_proces
     """
     client = FakeShioaji()
     harness = sinopac_site(client)
-    started = harness.dependencies.process_started
+    started = harness.dependencies.process.started_at
     session = harness.clock.to_trading_date(started - timedelta(minutes=5))
     client.Contracts = FakeContracts(FakeStocks({"2330": stock("2330", 100 / 1.1, session)}))
     left = unconfirmed_buy(harness, ended=False, sent_at=started - timedelta(minutes=5), pending_at=102.0)
@@ -371,7 +371,7 @@ async def test_the_settlements_of_sinopac_in_one_process_run_one_at_a_time() -> 
     harness = sinopac_site(client)
     unconfirmed_buy(harness)
 
-    async with harness.dependencies.settlement_locks[ExecutionProvider.SHIOAJI]:
+    async with harness.dependencies.process.settlement_locks[ExecutionProvider.SHIOAJI]:
         timer = asyncio.create_task(settle_users_orders(harness.runtime))
 
         for _ in range(20):

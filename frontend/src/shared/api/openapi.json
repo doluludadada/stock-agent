@@ -1802,18 +1802,6 @@
             ],
             "title": "Eps Growing Quarters"
           },
-          "filed_eps_fetched_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filed Eps Fetched At"
-          },
           "quarters": {
             "items": {
               "$ref": "#/components/schemas/QuarterResult"
@@ -1824,8 +1812,7 @@
         },
         "required": [
           "quarters",
-          "eps_growing_quarters",
-          "filed_eps_fetched_at"
+          "eps_growing_quarters"
         ],
         "title": "EarningsTrend",
         "type": "object"
@@ -1848,30 +1835,17 @@
         "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
         "type": "string"
       },
-      "EpsBasis": {
-        "enum": [
-          "actual",
-          "estimate"
-        ],
-        "title": "EpsBasis",
-        "type": "string"
-      },
       "EpsKind": {
         "enum": [
-          "single_quarter",
           "cumulative",
-          "annual",
           "trailing_twelve_months"
         ],
         "title": "EpsKind",
         "type": "string"
       },
       "EpsResponse": {
-        "description": "An EPS figure (Eps): it never comes without its period, kind, basis, source and fetch time.",
+        "description": "An EPS figure (Eps): it never comes without its period, kind, source and fetch time.",
         "properties": {
-          "basis": {
-            "$ref": "#/components/schemas/EpsBasis"
-          },
           "fetched_at": {
             "format": "date-time",
             "title": "Fetched At",
@@ -1896,7 +1870,6 @@
           "value",
           "kind",
           "period_label",
-          "basis",
           "source",
           "fetched_at"
         ],
@@ -3896,7 +3869,7 @@
         "type": "object"
       },
       "OrderPricing": {
-        "description": "What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.\nAudience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.",
+        "description": "What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.\nAudience.order_pricing picks one; OrderRule and the follow's window read it, and nothing else decides by it.",
         "enum": [
           "realtime_quote",
           "official_close"

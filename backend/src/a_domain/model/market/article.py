@@ -23,14 +23,11 @@ class Article:
     title: str
     content: str
     url: str | None = None
-    author: str | None = None
     content_type: ContentType = ContentType.DISCUSSION
     published_at: datetime
     fetched_at: datetime
     engagement: int = Field(default=0, ge=0)
     """Reactions and replies counted by the source platform."""
-
-    raw_metadata: dict | None = None
 
     clause: str | None = None
     """The clause of the exchange's material information rules an announcement is filed under, as served. None for news and posts."""

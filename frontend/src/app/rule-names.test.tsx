@@ -8,7 +8,8 @@ import { changeLocale, initI18n, type Locale } from '@/i18n'
 import { session } from '@/shared/api'
 import { TEST_USER } from '@/test/users'
 import { RunRoute } from './router/routes/runs'
-import { EditStrategyRoute, NewStrategyRoute, StrategyLibraryRoute } from './router/routes/strategies'
+import { StrategyLibraryPage } from '@/features/strategies'
+import { EditStrategyRoute, NewStrategyRoute } from './router/routes/strategies'
 
 const RUN = '22222222-2222-4222-8222-222222222222'
 const MY_RUN = '33333333-3333-4333-8333-333333333333'
@@ -86,7 +87,7 @@ describe('the built-in strategies’ rule names', () => {
 
   it('read in Chinese in the rules sheet of the zh-TW library', async () => {
     const user = userEvent.setup()
-    await open('zh-TW', [{ path: '/strategies', element: <StrategyLibraryRoute /> }], '/strategies')
+    await open('zh-TW', [{ path: '/strategies', element: <StrategyLibraryPage /> }], '/strategies')
     await user.click(await screen.findByRole('button', { name: '查看規則' }))
     const sheet = await screen.findByRole('dialog')
     expect(within(sheet).getByText('股價站上 20 日均線')).toBeVisible()
@@ -95,7 +96,7 @@ describe('the built-in strategies’ rule names', () => {
 
   it('stay in English in the English rules sheet', async () => {
     const user = userEvent.setup()
-    await open('en', [{ path: '/strategies', element: <StrategyLibraryRoute /> }], '/strategies')
+    await open('en', [{ path: '/strategies', element: <StrategyLibraryPage /> }], '/strategies')
     await user.click(await screen.findByRole('button', { name: 'View rules' }))
     expect(within(await screen.findByRole('dialog')).getByText('Price Above MA_20')).toBeVisible()
   })

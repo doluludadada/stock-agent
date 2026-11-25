@@ -2277,8 +2277,6 @@ export interface components {
         EarningsTrend: {
             /** Eps Growing Quarters */
             eps_growing_quarters: number | null;
-            /** Filed Eps Fetched At */
-            filed_eps_fetched_at: string | null;
             /** Quarters */
             quarters: components["schemas"]["QuarterResult"][];
         };
@@ -2289,21 +2287,15 @@ export interface components {
         EliminationReason: "eps_unavailable" | "eps_not_positive" | "price_missing" | "price_stale" | "below_min_undervaluation" | "no_price_history" | "technical_hard_failure";
         EmailAddress: string;
         /**
-         * EpsBasis
-         * @enum {string}
-         */
-        EpsBasis: "actual" | "estimate";
-        /**
          * EpsKind
          * @enum {string}
          */
-        EpsKind: "single_quarter" | "cumulative" | "annual" | "trailing_twelve_months";
+        EpsKind: "cumulative" | "trailing_twelve_months";
         /**
          * EpsResponse
-         * @description An EPS figure (Eps): it never comes without its period, kind, basis, source and fetch time.
+         * @description An EPS figure (Eps): it never comes without its period, kind, source and fetch time.
          */
         EpsResponse: {
-            basis: components["schemas"]["EpsBasis"];
             /**
              * Fetched At
              * Format: date-time
@@ -3074,7 +3066,7 @@ export interface components {
         /**
          * OrderPricing
          * @description What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.
-         *     Audience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.
+         *     Audience.order_pricing picks one; OrderRule and the follow's window read it, and nothing else decides by it.
          * @enum {string}
          */
         OrderPricing: "realtime_quote" | "official_close";

@@ -1,5 +1,5 @@
 import { Star } from 'lucide-react'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { useIsSignedIn } from '@/shared/api'
@@ -22,15 +22,14 @@ export function WatchButton({ code, label, variant = 'full', className }: WatchB
   const reason = useErrorReason()
   const signedIn = useIsSignedIn()
   const links = useAuthLinks()
-  const location = useLocation()
   const entries = useWatchlistEntries()
   const change = useWatchlistChange()
   const watched = isManuallyWatched(entries.data, code)
 
-  if (!signedIn && links) {
+  if (!signedIn) {
     return (
       <Button asChild variant={variant === 'icon' ? 'ghost' : 'outline'} size={variant === 'icon' ? 'icon' : 'default'} className={className}>
-        <Link to={links.signIn(`${location.pathname}${location.search}`)} aria-label={variant === 'icon' ? t('action.signInToWatch', { name: label }) : undefined}>
+        <Link to={links.signIn} aria-label={variant === 'icon' ? t('action.signInToWatch', { name: label }) : undefined}>
           <Star aria-hidden className="size-4" />
           {variant === 'full' && t('action.signInToWatch', { name: label })}
         </Link>

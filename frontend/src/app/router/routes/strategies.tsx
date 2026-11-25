@@ -1,9 +1,5 @@
 import { useParams, useSearchParams } from 'react-router'
-import { StrategyBuilderPage, StrategyLibraryPage, type BuilderMode } from '@/features/strategies'
-
-export function StrategyLibraryRoute() {
-  return <StrategyLibraryPage />
-}
+import { StrategyBuilderPage, type BuilderMode } from '@/features/strategies'
 
 export function NewStrategyRoute() {
   const [params] = useSearchParams()

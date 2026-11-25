@@ -30,7 +30,7 @@ describe('sign-in with Google', { timeout: 20_000 }, () => {
   })
 
   it('is a link the browser navigates to, on the sign-in screen of a site that offers it', async () => {
-    renderAt('/sign-in', true, <SignInScreen registerHref="/register" onDone={() => undefined} />)
+    renderAt('/sign-in', true, <SignInScreen onDone={() => undefined} />)
 
     expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toHaveAttribute('href', '/v1/auth/google/start')
     expect(screen.getByLabelText('Username or email')).toBeVisible()
@@ -44,7 +44,7 @@ describe('sign-in with Google', { timeout: 20_000 }, () => {
   })
 
   it('is absent on a site that does not offer it', async () => {
-    renderAt('/sign-in', false, <SignInScreen registerHref="/register" onDone={() => undefined} />)
+    renderAt('/sign-in', false, <SignInScreen onDone={() => undefined} />)
 
     expect(await screen.findByText(/Registration is closed/)).toBeVisible()
     expect(screen.queryByRole('link', { name: 'Sign in with Google' })).not.toBeInTheDocument()
@@ -57,7 +57,7 @@ describe('sign-in with Google', { timeout: 20_000 }, () => {
     ['throttled', /Too many sign-in attempts/],
     ['something_new', /did not go through/],
   ])('says why a sign-in ended without a session: %s', async (refusal, words) => {
-    renderAt(`/sign-in?google=${refusal}`, true, <SignInScreen registerHref="/register" onDone={() => undefined} />)
+    renderAt(`/sign-in?google=${refusal}`, true, <SignInScreen onDone={() => undefined} />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(words)
   })

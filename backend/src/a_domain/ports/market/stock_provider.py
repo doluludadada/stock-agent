@@ -12,7 +12,7 @@ class IStockProvider(Protocol):
     Workflows fill those objects with prices, articles and reports, so nothing one workflow
     writes may reach the Stock objects that a later call returns.
 
-    It is separate from IOhlcvProvider because a market's stock list and its prices can come from different
+    It is separate from IPriceHistoryProvider because a market's stock list and its prices can come from different
     sources: for the US market, the S&P 500 components from one API and their daily bars from another.
     """
 

@@ -996,7 +996,9 @@ async def test_a_save_that_keeps_the_server_changes_nothing_about_ordering(serve
 # ------------------------------- the settings files on disk are the switch every process asks ------------------------------- #
 
 
-async def test_the_switch_is_what_the_settings_on_disk_say_at_each_ask_and_off_while_they_do_not_say(ordering_project: Path) -> None:
+async def test_the_switch_is_what_the_settings_on_disk_say_at_each_ask_and_lets_nobody_order_while_they_do_not_say(
+    ordering_project: Path,
+) -> None:
     switch, other_process = SettingsFileOrderingSwitch(ordering_project), SettingsFileOrderingSwitch(ordering_project)
     on = (await sinopac_switch(switch), await sinopac_switch(other_process))
 
@@ -1012,7 +1014,7 @@ async def test_the_switch_is_what_the_settings_on_disk_say_at_each_ask_and_off_w
     shown, nobody = (FeatureVisibility.ADMINISTRATORS, ShioajiServer.SIMULATION), (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
     assert on == (shown, shown)
     assert off == (nobody, nobody)
-    assert (unset, not_loadable) == (nobody, None), "files no start accepts give no answer, which lets nobody order"
+    assert (unset, not_loadable) == (None, None), "files that leave the switch out, or no start accepts, let nobody order"
 
 
 async def test_a_saved_log_level_and_the_follow_times_apply_at_once_and_the_times_read_in_the_day_s_order(project: Path) -> None:

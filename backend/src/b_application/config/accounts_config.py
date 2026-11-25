@@ -16,9 +16,8 @@ class AccountsConfig(BaseSettings):
     """
     What the user accounts allow, from the `accounts` section of config/appsetting.yaml; the administrator changes them
     in the settings editor, and a save applies them at once. The key never comes from the database or a settings file.
-    A file that lacks a setting of sign-in with Google, such as a deployment's older copy, starts: each runs on its
-    default, and the site offers no sign-in with Google while it lacks one of Google's addresses, which have no default
-    because no address is written in code.
+    A file that lacks one of Google's addresses, such as a deployment's older copy, starts, and the site offers no
+    sign-in with Google, because no address is written in code.
     """
 
     model_config = SettingsConfigDict(
@@ -103,9 +102,7 @@ class AccountsConfig(BaseSettings):
     google_client_secret: SecretStr | None = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")
     """GOOGLE_CLIENT_SECRET from the environment or .env. The site offers sign-in with Google with both and public_origin."""
 
-    public_origin: Annotated[
-        str, Field(pattern=r"^(https?://[A-Za-z0-9.-]+(:\d{1,5})?)?$", json_schema_extra={"operator_only": True})
-    ] = ""
+    public_origin: Annotated[str, Field(pattern=r"^(https?://[A-Za-z0-9.-]+(:\d{1,5})?)?$", json_schema_extra={"operator_only": True})]
     """
     The address the browser reaches the site at: the scheme and the host, such as the https address of the server's
     Tailscale name, without a path or a trailing slash. It is https, or http on localhost or 127.0.0.1 only. Google
@@ -113,13 +110,13 @@ class AccountsConfig(BaseSettings):
     sign-in with Google.
     """
 
-    google_administrator_emails: tuple[EmailAddress, ...] = ()
+    google_administrator_emails: tuple[EmailAddress, ...]
     """
     Google accounts that sign in as administrators, by their whole email in any case. The first sign-in creates the
     account, on an installation with no user yet too, or makes the account with that email an administrator.
     """
 
-    google_allowed_emails: tuple[EmailAddress, ...] = ()
+    google_allowed_emails: tuple[EmailAddress, ...]
     """
     Google accounts that sign in as users, by their whole email in any case, whether registration is open or not. An
     email on neither list signs in with Google only while registration_open is true.

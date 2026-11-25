@@ -129,23 +129,17 @@ def quotes_of(connection: ShioajiConnection, login: ShioajiLogin) -> ShioajiQuot
     )
 
 
-def order(
-    action: TradeAction = TradeAction.BUY,
-    quantity: int = 1000,
-    price: float | None = 100.0,
-    time_in_force: TimeInForce = TimeInForce.IOC,
-    stock_id: str = "2330",
-) -> Order:
+def order(action: TradeAction = TradeAction.BUY, quantity: int = 1000, price: float = 100.0, stock_id: str = "2330") -> Order:
     return Order(
         run_id=new_run_id(),
         decision_id=new_decision_id(),
         stock_id=stock_id,
         action=action,
-        order_type=OrderType.LIMIT if price is not None else OrderType.MARKET,
+        order_type=OrderType.LIMIT,
         quantity=quantity,
         limit_price=price,
-        price_at_signal=price or 100.0,
-        time_in_force=time_in_force,
+        price_at_signal=price,
+        time_in_force=TimeInForce.IOC,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -159,8 +153,10 @@ def credentials() -> ShioajiConfig:
     """Every Shioaji variable set, the test pair to its own values: a login shows which pair its environment read."""
     return ShioajiConfig(
         _env_file=None,
+        server=ShioajiServer.SIMULATION,
         poll_interval_seconds=0,
         max_polls=3,
+        simulation_initial_cash=1_000_000,
         SHIOAJI_API_KEY="key",
         SHIOAJI_SECRET_KEY="secret",
         SHIOAJI_CA_PATH="/certs/Sinopac.pfx",
@@ -223,24 +219,9 @@ async def test_a_mixed_quantity_is_split_into_a_board_lot_ioc_order_and_an_odd_l
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.FILLED, 2500, lots.fee + odd.fee)
 
 
-async def test_fok_is_sent_as_fok() -> None:
-    client = FakeShioaji()
-
-    placed = await provider(client).place_order(order(time_in_force=TimeInForce.FOK), no_refusal, asyncio.Event())
-
-    assert (sent(client), placed.status) == ([(StockOrderLot.Common, 1, BrokerTimeInForce.FOK, 100.0)], OrderStatus.FILLED)
-
-
 @pytest.mark.parametrize(
     ("placing", "reason"),
-    [
-        (order(time_in_force=TimeInForce.ROD), "UNSUPPORTED_TIME_IN_FORCE: ROD would leave a working order"),
-        (order(quantity=1500, time_in_force=TimeInForce.FOK), "UNSUPPORTED_TIME_IN_FORCE: FOK cannot cover 1500 shares"),
-        (order(quantity=500, time_in_force=TimeInForce.FOK), "UNSUPPORTED_TIME_IN_FORCE: FOK cannot cover 500 shares"),
-        (order(price=None), "UNSUPPORTED_ORDER_TYPE"),
-        (order(stock_id="9999"), "BROKER_REFUSED: Shioaji has no stock contract 9999"),
-        (order(TradeAction.SELL), "POSITION_NOT_FOUND"),
-    ],
+    [(order(stock_id="9999"), "BROKER_REFUSED: Shioaji has no stock contract 9999"), (order(TradeAction.SELL), "POSITION_NOT_FOUND")],
 )
 async def test_an_order_the_adapter_cannot_send_faithfully_is_rejected_and_never_sent(placing: Order, reason: str) -> None:
     client = FakeShioaji()
@@ -627,7 +608,9 @@ async def test_a_cancel_the_broker_does_not_settle_within_its_timeout_leaves_the
 )
 def test_an_odd_lot_window_or_a_cancel_wait_past_its_bound_is_refused_naming_the_setting(setting: dict[str, float]) -> None:
     with pytest.raises(ValidationError, match=next(iter(setting))):
-        ShioajiConfig(_env_file=None, poll_interval_seconds=0, max_polls=3, **setting)
+        ShioajiConfig(
+            _env_file=None, server=ShioajiServer.SIMULATION, poll_interval_seconds=0, max_polls=3, simulation_initial_cash=1, **setting
+        )
 
 
 async def test_an_odd_lot_part_that_does_not_deal_stays_working_through_its_matches_before_the_rest_is_cancelled(

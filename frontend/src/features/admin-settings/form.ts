@@ -1,6 +1,5 @@
-import type { Schemas } from '@/shared/api'
+import type { Schemas, SettingsProblem } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import type { SettingsProblem } from './model'
 
 export type SettingField = Schemas['SettingField']
 export type SettingChange = Schemas['SettingChange']
@@ -231,4 +230,14 @@ export function problemsAt(problems: readonly SettingsProblem[], path: string): 
 /** The problems no field of the form holds: from .env, the database or a broker login. */
 export function problemsElsewhere(problems: readonly SettingsProblem[], fields: readonly SettingField[]): SettingsProblem[] {
   return problems.filter((item) => !fields.some((field) => problemsAt([item], field.path).length > 0))
+}
+
+/** The form's inputs that show the waiting changes again, so nothing typed before the trip to Google is lost. */
+export function inputsOf(fields: readonly SettingField[], changes: readonly SettingChange[]): Record<string, Input> {
+  const inputs: Record<string, Input> = {}
+  for (const change of changes) {
+    const field = fields.find((item) => item.path === change.path)
+    if (field) inputs[change.path] = inputOf({ ...field, value: change.value })
+  }
+  return inputs
 }

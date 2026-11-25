@@ -259,7 +259,7 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
         return {
             index_of[snapshot.code]: quote
             for snapshot in snapshots
-            if snapshot.code in index_of and (quote := index_quote_of(snapshot, self._epoch)) is not None
+            if snapshot.code in index_of and (quote := quote_of(snapshot, self._epoch, board_lot_shares=0)) is not None
         }
 
 
@@ -319,37 +319,16 @@ def index_contracts_of(client: Shioaji, named: Mapping[MarketIndex, IndexQuoteCo
     return {index: contract for index, contract in found.items() if isinstance(contract, Index)}
 
 
-def index_quote_of(snapshot: Snapshot, epoch: datetime) -> Ohlcv | None:
-    """
-    An index's session so far, closing at its latest value and stamped with the exchange's time of it, with its change
-    from the previous close. As of a stock (quote_of), a snapshot with no volume of the session has no quote: before the
-    session's first trade an index still stands at the previous close. The bar has no volume of its own.
-
-    Measured on 2026-11-17 after the session on the simulation login: TSE001 at 13:33, 40092.11, a total volume of
-    14,456,731.
-    """
-    if snapshot.total_volume <= 0:
-        return None
-
-    return Ohlcv(
-        ts=epoch + timedelta(microseconds=snapshot.ts // 1000),
-        open=snapshot.open,
-        high=snapshot.high,
-        low=snapshot.low,
-        close=snapshot.close,
-        change=snapshot.change_price,
-    )
-
-
 def quote_of(snapshot: Snapshot, epoch: datetime, board_lot_shares: int) -> Ohlcv | None:
     """
-    The session so far, closing at the last trade and stamped with the exchange's time of that trade, with its change
-    from the session's reference price. A stock that has not traded this session gets no quote: its price is the
-    reference price, which nobody paid.
+    The session so far of a stock or an index, closing at the last trade and stamped with the exchange's time of that
+    trade, with its change from the session's reference price. A snapshot with no volume of the session gets no quote:
+    its price is the reference price, which nobody paid. Volumes count board lots of `board_lot_shares`; an index
+    passes 0, since its bar has no volume of its own.
 
     After a session a snapshot is stamped 13:30 for a last trade in the closing auction and 14:30 for one in the
-    after-hours fixed-price session. A stock that has not traded yet is stamped 08:30 of the day with a total
-    volume of 0. Volumes count board lots.
+    after-hours fixed-price session. A stock that has not traded yet is stamped 08:30 of the day with a total volume of
+    0. An index's snapshot counts its market's volume: TSE001 at 13:33 on 2026-11-17, 14,456,731 on the simulation login.
     """
     if snapshot.total_volume <= 0:
         return None

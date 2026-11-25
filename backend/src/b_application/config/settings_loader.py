@@ -48,14 +48,6 @@ def get_project_root() -> Path:
     raise FileNotFoundError("Could not find project root.")
 
 
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-
-    with path.open(encoding="utf-8") as config_file:
-        return yaml.safe_load(config_file) or {}
-
-
 def settings_revision(text: str) -> str:
     """A settings file's revision: the SHA-256 of its UTF-8 text, so any edit, by any editor, changes it."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -238,47 +230,22 @@ def unread_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str
             yield path, "comes from the environment or .env, never from a settings file"
         elif path in prompts:
             yield path, f"is the prompt {prompts[path]} of instructions.yaml"
-        elif key in retired_keys(model):
-            continue
         elif key not in fields or fields[key].exclude:
             yield path, "names no setting"
         elif isinstance(value, Mapping) and (section := section_model(fields[key].annotation)) is not None:
             yield from unread_settings(value, section, f"{path}.")
 
 
-def retired_keys(model: type[BaseModel]) -> tuple[str, ...]:
-    """
-    The settings a section once had and no longer reads, which its class names in `retired` of its json_schema_extra.
-    A file that still sets one starts: the key is skipped, and settings_notices names it.
-    """
-    extra = model.model_config.get("json_schema_extra")
-    named = extra.get("retired") if isinstance(extra, dict) else None
-    return tuple(str(key) for key in named) if isinstance(named, list) else ()
-
-
-def retired_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str) -> Iterator[str]:
-    """The path of each retired setting one section of a settings file still sets; sections are followed into their models."""
-    for key, value in node.items():
-        if key in retired_keys(model):
-            yield f"{prefix}{key}"
-        elif (
-            isinstance(value, Mapping) and key in model.model_fields and (section := section_model(model.model_fields[key].annotation))
-        ):
-            yield from retired_settings(value, section, f"{prefix}{key}.")
-
-
 def settings_notices(project_root: Path) -> list[str]:
     """
     What a start says about config/appsetting.yaml and config/instructions.yaml as they are on disk without refusing
-    them, one line each: the retired settings appsetting.yaml still sets, which the app ignores, the settings it does
-    does not set and the site goes without something for, as a deployment's older copy of the file does for an address
-    added since (`without` in its json_schema_extra), and the prompts instructions.yaml does not set. A setting the
-    file does not set that has a default runs on it and is not mentioned: that is every setting the shipped file
-    leaves to its default. Names only, never a value.
+    them, one line each: the settings appsetting.yaml does not set and the site goes without something for, as a
+    deployment's older copy of the file does for an address added since (`without` in its json_schema_extra), and the
+    prompts instructions.yaml does not set. A setting the file does not set that has a default runs on it and is not
+    mentioned: that is every setting the shipped file leaves to its default. Names only, never a value.
     """
     file = SettingsFile.APPSETTING
     document = parsed_document(file, settings_text(project_root, file))
-    retired = list(retired_settings(document, AppConfig, ""))
     in_file = [
         keys for field in settings_fields({}, with_operator_only=True) for place, keys in [setting_place(field.path)] if place is file
     ]
@@ -286,9 +253,6 @@ def settings_notices(project_root: Path) -> list[str]:
     schema = settings_schema()
     without = dict(settings_without(schema, schema, ""))
     notices = []
-
-    if retired:
-        notices.append(f"{file.file_name} still sets {', '.join(retired)}: the app no longer reads them. Remove them from the file.")
 
     for lack in dict.fromkeys(without[path] for path in unset if path in without):
         missing = ", ".join(path for path in unset if without.get(path) == lack)

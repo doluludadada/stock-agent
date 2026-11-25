@@ -181,7 +181,7 @@ describe('saved settings', () => {
     revision: 4,
   }
   const builtIns = [builtIn('balanced')]
-  const edited = (strategy: Strategy): Strategy => ({ ...strategy, scoring: { ...strategy.scoring, baseScore: 60 } })
+  const edited = (strategy: Strategy): Strategy => ({ ...strategy, scoring: { ...strategy.scoring, base_score: 60 } })
 
   it('adds or replaces one strategy and keeps the revision the save must carry', () => {
     const copy = copyOfBalanced()
@@ -222,8 +222,8 @@ describe('saved settings', () => {
     const next = withBuiltInActive(changed, builtIn('balanced'), 'stg_new' as StrategyId)
     expect(next).toMatchObject({ activeStrategyId: 'balanced', strategies: [{ id: 'balanced' }, { id: 'aggressive' }, { id: 'stg_new' }] })
     if (typeof next === 'string') throw new Error(next)
-    expect(next.strategies[0]!.scoring.baseScore).toBe(builtIn('balanced').scoring.baseScore)
-    expect(next.strategies[2]!.scoring.baseScore).toBe(60)
+    expect(next.strategies[0]!.scoring.base_score).toBe(builtIn('balanced').scoring.base_score)
+    expect(next.strategies[2]!.scoring.base_score).toBe(60)
   })
 
   it('prunes only the indicator settings the editor itself left unused', () => {

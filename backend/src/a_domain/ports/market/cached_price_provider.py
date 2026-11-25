@@ -2,15 +2,13 @@ from datetime import date, datetime
 from typing import Protocol
 
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.types.enums import MarketType
 
 
-class ICachedPriceProvider(IOhlcvProvider, Protocol):
+class ICachedPriceProvider(IPriceHistoryProvider, Protocol):
     """
-    A personal site's daily history from the exchanges' own daily reports (IDailyHistorySource), kept in the database,
-    and its realtime quotes passed through uncached: the broker's on a Shioaji login, else the open-data archive's
-    refusal of every quote.
+    A personal site's daily history from the exchanges' own daily reports (IDailyHistorySource), kept in the database.
 
     The reports serve every listed stock's daily bar of one session per exchange and request, with its official change
     from the session's reference price, each exchange's own index per month, and each exchange's ex-right references of

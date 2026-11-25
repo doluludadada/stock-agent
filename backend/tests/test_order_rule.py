@@ -8,7 +8,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.order_rule import OrderGateRule, OrderPriceRule, OrderRule
+from a_domain.rules.trading.order_rule import OrderRule
 from a_domain.types.enums import OrderPricing, OrderStatus, OrderType, SignalSource, TimeInForce, TradeAction, TradingPhase
 from a_domain.types.ids import new_run_id
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -25,8 +25,7 @@ LAST_CLOSE = datetime(2026, 10, 16, 13, 30, tzinfo=TAIWAN_TIMEZONE)
 
 
 def order_rule(pricing: OrderPricing = OrderPricing.REALTIME_QUOTE) -> OrderRule:
-    price_rule = OrderPriceRule(pricing=pricing, price_freshness=DataFreshnessRule(timedelta(minutes=15)))
-    return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=LIMIT_PRICE)
+    return OrderRule(pricing=pricing, price_freshness=DataFreshnessRule(timedelta(minutes=15)), limit_price_rule=LIMIT_PRICE)
 
 
 RULE = order_rule()

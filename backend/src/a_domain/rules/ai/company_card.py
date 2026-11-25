@@ -8,19 +8,17 @@ from pydantic.dataclasses import dataclass
 from a_domain.model.market.article import Article
 from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.stock import Stock
-from a_domain.rules.ai.stock_brief import BriefContext, keyed_facts
+from a_domain.rules.ai.stock_brief import BriefContext, BriefFact, held_fact, keyed_facts, listing_line
 from a_domain.rules.fundamentals.stock_analysis import RevenueTrend
 from a_domain.types.enums import BriefSourceKind
 
 
-def listing_fact(
-    stock: Stock, profile: CompanyProfile | None, industry_names: dict[str, str], day: date
-) -> tuple[BriefSourceKind, date, str, None, None]:
+def listing_fact(stock: Stock, profile: CompanyProfile | None, industry_names: dict[str, str], day: date) -> BriefFact:
     """The company as the exchange's open data gives it, each held figure named; `day` dates it while no profile is held."""
     held = profile or CompanyProfile(stock_id=stock.stock_id)
     industry = industry_names.get(held.industry_code or "") or stock.industry
     said = [
-        f"{stock.stock_id} {held.short_name or stock.name or 'name not held'}, listed on {stock.market.value}",
+        listing_line(stock, held.short_name or stock.name),
         f"industry in the exchange's listing: {industry or 'not held'}",
         None if held.full_name is None else f"full name {held.full_name}",
         None if held.founded_on is None else f"founded {held.founded_on.isoformat()}",
@@ -30,18 +28,18 @@ def listing_fact(
         None if held.chairman is None else f"chairman {held.chairman}",
         None if held.general_manager is None else f"general manager {held.general_manager}",
     ]
-    return (BriefSourceKind.COMPANY, held.reported_on or day, "; ".join(part for part in said if part), None, None)
+    return held_fact(BriefSourceKind.COMPANY, held.reported_on or day, "; ".join(part for part in said if part))
 
 
-def filed_business_facts(profile: CompanyProfile | None) -> list[tuple[BriefSourceKind, date, str, None, str | None]]:
+def filed_business_facts(profile: CompanyProfile | None) -> list[BriefFact]:
     if profile is None or not profile.main_business or profile.main_business_fetched_at is None:
         return []
 
     text = f"main business as the company filed it with MOPS: {profile.main_business}"
-    return [(BriefSourceKind.PROFILE, profile.main_business_fetched_at.date(), text, None, profile.main_business_url)]
+    return [held_fact(BriefSourceKind.PROFILE, profile.main_business_fetched_at.date(), text, url=profile.main_business_url)]
 
 
-def yearly_revenue_facts(revenue: RevenueTrend, day: date) -> list[tuple[BriefSourceKind, date, str, None, None]]:
+def yearly_revenue_facts(revenue: RevenueTrend, day: date) -> list[BriefFact]:
     """The revenue of the last calendar year before `day`, when all twelve of its months are held: it changes once a year."""
     months = [month for month in revenue.months if month.year == day.year - 1 and month.revenue is not None]
 
@@ -50,14 +48,14 @@ def yearly_revenue_facts(revenue: RevenueTrend, day: date) -> list[tuple[BriefSo
 
     total = sum(month.revenue or 0 for month in months)
     served = max(month.served_date for month in months)
-    return [(BriefSourceKind.REVENUE, served, f"revenue of {day.year - 1}, twelve months: {total:,.0f} thousand TWD", None, None)]
+    return [held_fact(BriefSourceKind.REVENUE, served, f"revenue of {day.year - 1}, twelve months: {total:,.0f} thousand TWD")]
 
 
-def report_facts(sections: Sequence[Article], section_length: PositiveInt) -> list[tuple[BriefSourceKind, date, str, str, str | None]]:
+def report_facts(sections: Sequence[Article], section_length: PositiveInt) -> list[BriefFact]:
     """The sections of the newest annual report among those given, each by its title and its kept text cut at `section_length`."""
     newest = max((section.fact_date or date.min for section in sections), default=date.min)
     return [
-        (
+        held_fact(
             BriefSourceKind.ANNUAL_REPORT,
             section.published_at.date(),
             f"{section.title} | {' '.join(section.content.split())[:section_length]}",
@@ -93,7 +91,7 @@ class CompanyCardContextRule:
             *yearly_revenue_facts(revenue, day),
             *report_facts(sections, self.section_length),
         ]
-        said = [f"{kind.value}|{title or ''}|{url or ''}|{text}" for kind, _, text, title, url in found]
+        said = [f"{fact.source.kind.value}|{fact.source.title or ''}|{fact.source.url or ''}|{fact.text}" for fact in found]
         digest = sha256("\n".join([self.instructions, *said]).encode()).hexdigest()
 
         return BriefContext(

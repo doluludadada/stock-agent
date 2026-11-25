@@ -21,9 +21,10 @@ import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { StackedBar } from '@/shared/ui/stacked-bar'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
+import type { ValuePoint } from '@/shared/ui/value-chart'
 import { useAccountAtQuotes, useAccountHistory, useTrades, type AccountHistory } from './api'
 import { TradesPanel } from './Trades'
-import { equityPoints, holdings, moveBetween, quotedAt, totalReturn, unrealizedRatio, withLatest, type AccountValue, type EquityPoint, type Position } from './model'
+import { equityPoints, holdings, moveBetween, quotedAt, totalReturn, unrealizedRatio, withLatest, type AccountValue, type Position } from './model'
 
 const ValueChart = lazy(() => import('@/shared/ui/value-chart').then((module) => ({ default: module.ValueChart })))
 
@@ -155,7 +156,7 @@ function EquityPanel({ history, className }: { history: AccountHistory; classNam
     const sorted = [...points].sort((a, b) => a.value - b.value)
     return { low: sorted[0], high: sorted.at(-1) }
   }, [points])
-  const day = (point: EquityPoint | undefined) => point && <span className="block text-xs font-normal text-muted-foreground">{format.monthDay(point.date)}</span>
+  const day = (point: ValuePoint | undefined) => point && <span className="block text-xs font-normal text-muted-foreground">{format.monthDay(point.date)}</span>
 
   return (
     <Panel

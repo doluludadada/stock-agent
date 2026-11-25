@@ -309,7 +309,7 @@ async def write_stock_brief(
     ai_allowance_spent when the user's or the site's paid AI calls of the day are spent. It reads held data only, records no run and
     never orders. Private: a visitor never causes a call.
     """
-    async with switch.brief_turns.of(stock_id):
+    async with switch.brief_turns[stock_id]:
         briefs = await pipeline.write_stock_brief(stock_id)
 
     if briefs is None:

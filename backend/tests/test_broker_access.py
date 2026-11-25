@@ -201,16 +201,6 @@ def test_the_order_limit_follows_the_equity_the_run_valued_up_and_down(equity: f
     assert reason == (None if passes else "ORDER_VALUE_LIMIT")
 
 
-def test_a_sinopac_buy_without_a_limit_price_is_refused_since_the_limits_cannot_value_it() -> None:
-    market = replace(order(), order_type=OrderType.MARKET, limit_price=None)
-
-    assert RULE.apply(market, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, EVERYONE, [], EQUITY) == (
-        RejectReason.ORDER_VALUE_LIMIT,
-        "has no limit price to value against trading.max_order_equity_pct and trading.max_daily_buy_equity_pct",
-    )
-    assert refusal(market, ExecutionProvider.MOCK, MOCK, None) is None
-
-
 def test_a_sinopac_buy_of_a_run_that_valued_no_account_is_refused_and_a_mock_one_needs_none() -> None:
     assert RULE.apply(order(), Workflow.FOLLOW, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, EVERYONE, [], None) == (
         RejectReason.ORDER_VALUE_LIMIT,

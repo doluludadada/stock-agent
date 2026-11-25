@@ -19,7 +19,7 @@ function renderRun() {
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <RunDetailPage runId={RUN} ruleName={(name) => name} />
+          <RunDetailPage runId={RUN} />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -77,7 +77,7 @@ describe('a running run whose poll fails', () => {
       <I18nextProvider i18n={initI18n('en')}>
         <QueryClientProvider client={client}>
           <MemoryRouter>
-            <RunDetailPage runId={RUN} ruleName={(name) => name} />
+            <RunDetailPage runId={RUN} />
           </MemoryRouter>
         </QueryClientProvider>
       </I18nextProvider>,
@@ -208,7 +208,7 @@ function serve({ follow, audience = PERSONAL_SITE }: Site) {
 
 function RunAt() {
   const { runId = '' } = useParams()
-  return <RunDetailPage key={runId} runId={runId} ruleName={(name) => name} />
+  return <RunDetailPage key={runId} runId={runId} />
 }
 
 function openRun() {

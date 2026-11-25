@@ -49,7 +49,7 @@ const valuation = {
   industryMedian: '{{industry}} median P/E',
   scenario: { conservative: 'Conservative {{pe}}×', base: 'Base {{pe}}×', optimistic: 'Optimistic {{pe}}×' },
   noFairPrice: 'No fair price: {{reason}}.',
-  epsKind: { single_quarter: 'single quarter', cumulative: 'cumulative', annual: 'annual', trailing_twelve_months: 'TTM' },
+  epsKind: { cumulative: 'cumulative', trailing_twelve_months: 'TTM' },
   epsUnavailable: {
     not_loaded: 'EPS not loaded',
     not_reported: 'No EPS filed (for example an ETF)',

@@ -90,13 +90,12 @@ async def get_brokerage_account(runtime: RuntimeDependency, user: CurrentUser, p
     `ordering` says, and it answers no account number and no credential's value.
     """
     config = runtime.config
-    link = runtime.real_broker.link() if runtime.real_broker is not None else None
     account = await pipeline.load_brokerage_statement()
 
     return BrokerageAccountResponse(
         server=config.shioaji.server,
         switch_refusal=account.switch_refusal,
-        login_up=link is not None and link.up,
+        login_up=account.statement is not None,
         login_down=runtime.login_down,
         ordering=ExecutionProvider.SHIOAJI.ordering_feature in shown_features(runtime, user),
         simulation_initial_cash=config.shioaji.simulation_initial_cash if config.shioaji.server.simulation else None,

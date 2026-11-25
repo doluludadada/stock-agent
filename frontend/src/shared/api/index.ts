@@ -6,7 +6,8 @@ export { authStatusKey, shows, useAuthStatus, useShown, useShows, type Feature, 
 export { runOrdersKey, useRunOrders, type Order } from './run-orders'
 export { brokerQuery, brokersKey, chosenOffer, useBrokerOffers, useBrokers, type Broker, type BrokerOffer, type Server } from './brokers'
 export { REAL_BROKER, REAL_MONEY, useAccountLabel } from './account-label'
-export type { PageRefusal, SaveConfirmationProps } from './settings-save'
+export { reasonOf, refusalOf, settingsFormKey, useSaveSettings, type PageRefusal, type SaveRefusal, type SettingsProblem } from './settings-save'
+export { confirmationRefusal, startGoogleConfirmation, takePendingSave, type PendingSave } from './google-confirmation'
 export {
   latestQuote,
   marketKeys,

@@ -7,7 +7,8 @@ import { builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
 import { TEST_USER } from '@/test/users'
-import { NewStrategyRoute, StrategyLibraryRoute } from './router/routes/strategies'
+import { StrategyLibraryPage } from '@/features/strategies'
+import { NewStrategyRoute } from './router/routes/strategies'
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
 
@@ -34,7 +35,7 @@ describe('copying an official strategy', () => {
     session.signIn(TEST_USER)
     const router = createMemoryRouter(
       [
-        { path: '/strategies', element: <StrategyLibraryRoute /> },
+        { path: '/strategies', element: <StrategyLibraryPage /> },
         { path: '/strategies/new', element: <NewStrategyRoute /> },
       ],
       { initialEntries: ['/strategies'] },

@@ -643,25 +643,7 @@ const admin = {
     ai_model_id_missing: '{{provider}} needs its model id under ai.available_models.{{provider}}, or the app would not start.',
     search_on_open_data: 'Must be false on audience {{audience}}: a search brings news sites’ and X’s text, which this site may not use.',
   },
-  password: {
-    title: 'Save the settings?',
-    description: 'Enter your password to confirm. The server runs on the new settings at once.',
-    label: 'Your password',
-    wrong: 'The password is wrong. Nothing was saved.',
-    throttledMinutes: 'Too many wrong passwords. Try again in {{minutes}} min {{seconds}} s.',
-    throttledSeconds: 'Too many wrong passwords. Try again in {{seconds}} s.',
-    failed: 'The save did not go through: {{reason}}',
-    confirm: 'Save and apply',
-    saving: 'Saving…',
-    cancel: 'Cancel',
-    show: 'Show password',
-    hide: 'Hide password',
-  },
   google: {
-    title: 'Save the settings?',
-    description: 'Your account has no password, so you confirm by signing in to Google again. You come back here and the save is sent at once. The server then runs on the new settings.',
-    confirm: 'Confirm with Google',
-    cancel: 'Cancel',
     saving: 'Saving the changes you confirmed with Google…',
     refused: {
       stale_authentication: 'Google did not ask you to sign in again, so the save was not confirmed. Sign out of Google, sign in again and save once more, or set a password on the server with just reset-password.',
@@ -670,12 +652,6 @@ const admin = {
       throttled: 'Too many attempts from this address. Try again later.',
       failed: 'The confirmation by Google did not go through. Nothing was saved.',
     },
-  },
-  reason: {
-    administratorsOnly: 'This account is no longer an administrator.',
-    passwordRequired: 'The server needs your password for this.',
-    fileRefused: 'The server does not read or write this settings file: it is a link, lies outside the settings folder, or is too large.',
-    fileMissing: 'The server has no such settings file.',
   },
   leave: {
     title: 'Leave this page?',

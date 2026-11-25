@@ -242,7 +242,7 @@ def test_the_shipped_settings_name_three_formulas_and_the_one_of_ten_stocks_is_a
 
 
 WITH_A_THIRD = SHIPPED.replace(
-    "  # The ranking page compares",
+    "  # The revenue trend of the stock page",
     """    - name: revenue_yoy_and_high
       top: 20
       min_close: 10
@@ -254,7 +254,7 @@ WITH_A_THIRD = SHIPPED.replace(
           months: 3
         - kind: nearness_to_high
           high_sessions: 250
-  # The ranking page compares""",
+  # The revenue trend of the stock page""",
     1,
 )
 """The shipped settings with a formula of the other factors after the shipped three, so each refusal below has one place."""

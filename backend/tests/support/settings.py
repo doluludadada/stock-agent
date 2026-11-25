@@ -4,21 +4,27 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from a_domain.model.trading.ranking_formula import NearnessToHigh, RankingFormula, RevenueAcceleration
 from a_domain.rules.trading.ranking import MonthlyRankingRule
 from a_domain.types.enums import Audience, ShioajiCredential, ShioajiServer, SystemEnvironment
 from b_application.config.app_config import AppConfig
-from b_application.config.settings_loader import inject_built_in_strategies, load_yaml, settings_texts
+from b_application.config.settings_loader import inject_built_in_strategies, settings_texts
 from b_application.config.trading_config import RankingConfig, ShioajiConfig
 
 APPSETTING = Path(__file__).resolve().parents[3] / "config" / "appsetting.yaml"
 
 
+def load_yaml(path: Path) -> dict[str, Any]:
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
 def shipped_config(project_root: Path = Path(".")) -> AppConfig:
     """
     config/appsetting.yaml with the built-in strategies, as load_settings reads them, without the prompts of
-    config/instructions.yaml. A settings value has no code default, so a test reads it from here and changes what it
-    needs with model_copy(update=...).
+    config/instructions.yaml. A setting the file sets has no code default, so a test reads it from here and changes
+    what it needs with model_copy(update=...).
     """
     settings = load_yaml(APPSETTING)
     inject_built_in_strategies(settings, APPSETTING.parent / "strategies", settings_texts(APPSETTING.parents[1]))

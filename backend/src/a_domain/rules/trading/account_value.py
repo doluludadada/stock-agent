@@ -93,11 +93,7 @@ class FillSnapshotRule:
 
     def apply(self, order: Order, account: Account, stocks: Iterable[Stock], taken_at: datetime) -> AccountSnapshot:
         marks = {stock.stock_id: Mark(price=bar.close, at=bar.ts) for stock in stocks if (bar := stock.latest_bar) and bar.close}
-        fill_price = order.average_filled_price or order.limit_price
-
-        if fill_price is not None:
-            marks[order.stock_id] = Mark(price=fill_price, at=taken_at)
-
+        marks[order.stock_id] = Mark(price=order.average_filled_price or order.require_limit_price(), at=taken_at)
         positions = [replace(position, mark=marks.get(position.stock_id), weight=None) for position in account.positions]
 
         return AccountSnapshot(

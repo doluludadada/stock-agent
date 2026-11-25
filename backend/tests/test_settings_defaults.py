@@ -1,19 +1,18 @@
-"""A settings field that keeps a code default beside its config/appsetting.yaml value never disagrees with the YAML."""
+"""Every settings value lives in one place: a code default, or config/appsetting.yaml."""
 
 import pytest
 import settings_defaults
 from pydantic import ValidationError
-from support.settings import APPSETTING
+from support.settings import APPSETTING, load_yaml
 
 from b_application.config.app_config import AppConfig
 from b_application.config.collect_config import StockBriefConfig, WorldBriefConfig
-from b_application.config.settings_loader import load_yaml
 
 
-def test_no_code_default_disagrees_with_the_shipped_settings() -> None:
+def test_no_setting_of_the_shipped_file_has_a_code_default() -> None:
     duplicated = settings_defaults.duplicated_settings(AppConfig, load_yaml(APPSETTING))
 
-    assert [str(setting) for setting in duplicated if setting.differs] == []
+    assert [str(setting) for setting in duplicated] == []
 
 
 @pytest.mark.parametrize("section", [StockBriefConfig, WorldBriefConfig])

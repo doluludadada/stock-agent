@@ -1,9 +1,9 @@
 import math
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Literal, Self
+from typing import Literal
 
-from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator, validate_call
+from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeInt, PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
 
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
@@ -84,13 +84,6 @@ class Order:
     created_at: datetime
     updated_at: datetime
 
-    @model_validator(mode="after")
-    def price_matches_order_type(self) -> Self:
-        if (self.order_type == OrderType.LIMIT) != (self.limit_price is not None):
-            raise ValueError("A LIMIT order needs a limit_price and a MARKET order must not have one")
-
-        return self
-
     @property
     def remaining_quantity(self) -> int:
         return self.quantity - self.filled_quantity
@@ -108,6 +101,16 @@ class Order:
         )
 
         return f"{text}, reason={self.reason}" if self.reason else text
+
+    def require_limit_price(self) -> float:
+        """
+        The limit price. Every order the app builds is a LIMIT (OrderRule); it raises for one without, which only an old
+        journal row of a MARKET order can be.
+        """
+        if self.limit_price is None:
+            raise ValueError(f"order {self.id} is a {self.order_type.name} order with no limit price")
+
+        return self.limit_price
 
     def tag(self, part: int) -> str:
         """
@@ -138,10 +141,10 @@ class Order:
         if quantity > self.remaining_quantity:
             raise ValueError(f"Fill quantity {quantity} is more than the remaining {self.remaining_quantity}")
 
-        if self.limit_price is not None and self.action == TradeAction.BUY and price > self.limit_price:
+        if self.action == TradeAction.BUY and price > self.require_limit_price():
             raise ValueError("BUY fill price cannot exceed limit_price")
 
-        if self.limit_price is not None and self.action == TradeAction.SELL and price < self.limit_price:
+        if self.action == TradeAction.SELL and price < self.require_limit_price():
             raise ValueError("SELL fill price cannot be below limit_price")
 
         filled_quantity, held = self.filled_quantity + quantity, (self.average_filled_price or price, self.filled_quantity)

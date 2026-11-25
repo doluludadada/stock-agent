@@ -1,8 +1,7 @@
 from collections.abc import Collection
 
-from a_domain.rules.trading.ranking import RankingHistory
+from a_domain.rules.trading.ranking import RankingHistory, latest_decision
 from a_domain.rules.trading.ranking_standing import RankingStanding, RankingStandingRule
-from a_domain.types.errors import RankingUnavailable
 from b_application.config.app_config import AppConfig
 
 
@@ -22,11 +21,6 @@ class StockRankingStanding:
         if not stock_ids:
             return {}
 
-        decisions = self._decision_rule.apply(history.bars.sessions)
-
-        if not decisions:
-            raise RankingUnavailable("No ranking can be made yet: the daily history holds no decision session.")
-
-        column, revenue_month = decisions[-1]
+        column, revenue_month = latest_decision(self._decision_rule, history.bars.sessions)
 
         return self._standing_rule.apply(history, column, revenue_month, stock_ids)

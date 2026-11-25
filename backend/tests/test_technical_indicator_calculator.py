@@ -6,7 +6,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.rules.technical.calculation.calculator import IndicatorParameters, indicator_outputs, indicator_series
+from a_domain.rules.technical.calculation.calculator import IndicatorParameters, indicator_series
 from a_domain.types.enums import IndicatorKind, IndicatorOutput
 
 PARAMETERS = TypeAdapter(IndicatorParameters)
@@ -26,7 +26,12 @@ def closes(*values: float, volumes: tuple[int, ...] | None = None) -> list[Ohlcv
 
 
 def outputs(parameters: dict[str, object], history: list[Ohlcv]) -> dict[IndicatorOutput, float]:
-    return indicator_outputs(PARAMETERS.validate_python(parameters), history)
+    return latest(PARAMETERS.validate_python(parameters), history)
+
+
+def latest(indicator: IndicatorParameters, history: list[Ohlcv]) -> dict[IndicatorOutput, float]:
+    """The indicator's outputs at the last of the bars, as a strategy reads it there."""
+    return indicator_series(indicator, history)[-1]
 
 
 V, LINE, SIGNAL, HISTOGRAM = IndicatorOutput.VALUE, IndicatorOutput.LINE, IndicatorOutput.SIGNAL, IndicatorOutput.HISTOGRAM
@@ -169,8 +174,8 @@ def test_each_kind_gives_all_its_outputs_from_required_bars_and_none_from_fewer(
     indicator = PARAMETERS.validate_python(parameters)
 
     assert indicator.required_bars == required_bars
-    assert set(indicator_outputs(indicator, wavy_history(required_bars))) == set(indicator.kind.outputs)
-    assert indicator_outputs(indicator, wavy_history(required_bars - 1)) == {}
+    assert set(latest(indicator, wavy_history(required_bars))) == set(indicator.kind.outputs)
+    assert latest(indicator, wavy_history(required_bars - 1)) == {}
 
 
 @pytest.mark.parametrize(("parameters", "required_bars"), EVERY_KIND, ids=[str(parameters["kind"]) for parameters, _ in EVERY_KIND])
@@ -182,7 +187,7 @@ def test_each_kinds_series_holds_at_each_bar_exactly_its_outputs_over_the_bars_u
 
     series = indicator_series(indicator, history)
 
-    assert series == [indicator_outputs(indicator, history[:end]) for end in range(1, len(history) + 1)]
+    assert series == [latest(indicator, history[:end]) for end in range(1, len(history) + 1)]
     assert series[required_bars - 2] == {} and set(series[required_bars - 1]) == set(indicator.kind.outputs)
 
 

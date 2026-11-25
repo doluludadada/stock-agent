@@ -211,10 +211,10 @@ async def test_an_owner_session_refuses_an_update_that_moves_rows_and_a_core_sta
 
 @pytest.mark.asyncio
 async def test_a_repository_built_for_no_owner_refuses_before_any_sql(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db.for_owner(None))
+    repository = SqlTechnicalSettingsRepository(db.for_owner(None), harness_settings())
 
     with pytest.raises(SignInRequired):
-        await repository.load(harness_settings())
+        await repository.load()
 
     with pytest.raises(SignInRequired):
         await repository.save(harness_settings())

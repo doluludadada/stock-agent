@@ -14,12 +14,10 @@ async def follow_rankings_on_schedule(switch: RuntimeSwitch, runs: WorkflowRuns)
     The Web API's timer of the scheduled ranking follows: every api.follow_schedule_poll_seconds of the current
     settings it starts the follows that are due (start_due_follows), on the current runtime. It is the one timer that
     starts a run that orders, and it orders on each user's follow account: the user's mock account, or SinoPac's
-    simulation account. Each look first makes the site's Shioaji login again where it is due (RuntimeSwitch.log_in_again),
-    so the login is renewed within an interval of shioaji.login_renewal_time, before the session and the first follow
-    time, and a login that went down is made again within an interval too, or after the wait that follows a failed one.
-    It is the Web API's one maker of a new login: no request makes one. It never stops on an error of its own: it
-    logs it and looks again at the next interval. The lifespan cancels it at shutdown; a follow it started is a run of
-    the server like any other and is cancelled with them.
+    simulation account. Each look first makes the site's Shioaji login again where it is due (Runtime.login_due), the
+    Web API's only renewal. It never stops on an error of its own: it logs it and looks again at the next interval. The
+    lifespan cancels it at shutdown; a follow it started is a run of the server like any other and is cancelled with
+    them.
     """
     while True:
         try:

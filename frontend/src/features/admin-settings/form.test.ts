@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError } from '@/shared/api'
+import { ApiError, refusalOf } from '@/shared/api'
 import openapi from '@/shared/api/openapi.json'
 import { changesOf, choiceEntriesOf, entriesOf, GROUPS, groupsOf, headingOf, inputOf, onGrid, problemsAt, problemsElsewhere, sectionOf, shownAmount, stepped, type SettingField } from './form'
-import { refusalOf } from './model'
 
 function field(path: string, kind: SettingField['kind'], value: SettingField['value'], extra: Partial<SettingField> = {}): SettingField {
   return { path, kind, value, group: 'advanced', options: [], steps: [], minimum: null, maximum: null, step: null, unit: null, nullable: false, restart_only: false, ...extra }

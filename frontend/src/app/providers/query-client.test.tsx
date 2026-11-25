@@ -1,9 +1,8 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { useSaveSettings } from '@/features/admin-settings/api'
 import { useChooseAiModel } from '@/features/auth/api'
-import { session } from '@/shared/api'
+import { session, useSaveSettings } from '@/shared/api'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
 import { createQueryClient, scopeCacheToSession } from './query-client'
 

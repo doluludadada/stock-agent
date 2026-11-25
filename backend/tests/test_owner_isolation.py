@@ -17,7 +17,7 @@ import pytest_asyncio
 from sqlalchemy.exc import IntegrityError
 from support.databases import shipped_config
 from support.fakes import AiVendor, no_refusal
-from support.harness import MARKET_OPEN, harness_settings
+from support.harness import MARKET_OPEN
 from trading_stack import MovableClock, SilentLogger, analysed_stock, run_stats
 
 from a_domain.model.chat.message import Message, MessageRole
@@ -363,21 +363,20 @@ async def delete_backtest(owners: Owners) -> None:
 
 
 async def load(owners: Owners) -> None:
-    initial = harness_settings()
-    alices = await owners.alice.technical_settings_repository.load(initial)
-    await owners.alice.technical_settings_repository.save(replace(alices, active_strategy_id="buzz"))
+    alices = await owners.alice.technical_settings_repository.load()
+    saved = await owners.alice.technical_settings_repository.save(alices)
 
-    assert await owners.bob.technical_settings_repository.load(initial) == initial
-    assert (await owners.alice.technical_settings_repository.load(initial)).active_strategy_id == "buzz"
+    assert await owners.bob.technical_settings_repository.load() == alices
+    assert await owners.alice.technical_settings_repository.load() == saved != alices
 
 
 async def save_settings(owners: Owners) -> None:
-    alices = await owners.alice.technical_settings_repository.load(harness_settings())
+    alices = await owners.alice.technical_settings_repository.load()
 
     with pytest.raises(TechnicalSettingsConflictError):
-        await owners.bob.technical_settings_repository.save(replace(alices, active_strategy_id="buzz"))
+        await owners.bob.technical_settings_repository.save(alices)
 
-    assert await owners.alice.technical_settings_repository.load(harness_settings()) == alices
+    assert await owners.alice.technical_settings_repository.load() == alices
 
 
 # ------------------------------------------------------ the mock book ------------------------------------------------------ #

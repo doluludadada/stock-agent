@@ -80,17 +80,6 @@ class HistoryBackfill:
 
 
 @dataclass(frozen=True)
-class ArticleRefresh:
-    """The Web API timer's read of the news into the article store, as Pipeline.refresh_article_store returns it."""
-
-    stocks: int
-    """The stocks whose news it read."""
-
-    embedded: int
-    """The articles it embedded."""
-
-
-@dataclass(frozen=True)
 class ArticleBackfill:
     """What `just backfill-articles` did, as Pipeline.backfill_article_store returns it."""
 
@@ -116,20 +105,6 @@ class CompanyBackfill:
 
     reports: tuple[int, int]
     """AnnualReportRefresh: the annual reports read, and the companies left due."""
-
-
-@dataclass(frozen=True)
-class WorldUpdate:
-    """The world timer's read of the feeds, as WorldRefresh answers it for Pipeline.refresh_world."""
-
-    kept: int
-    """The world news items it added to the article store or replaced there."""
-
-    embedded: int
-    """The world news items it embedded."""
-
-    readings: int
-    """The world indicator readings that are new."""
 
 
 @dataclass(frozen=True)

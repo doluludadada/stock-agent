@@ -20,10 +20,10 @@ import type {
 } from './types'
 
 export const DEFAULT_SCORING: Scoring = {
-  baseScore: 50,
-  blockFailurePenalty: 15,
-  failureScoreReduction: 5,
-  passScoreIncrease: 5,
+  base_score: 50,
+  block_failure_penalty: 15,
+  failure_score_reduction: 5,
+  pass_score_increase: 5,
 }
 
 export type IndicatorTable = Record<IndicatorId, IndicatorConfig>

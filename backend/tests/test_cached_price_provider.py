@@ -55,7 +55,6 @@ def cache_over(
 ) -> CachedPriceProvider:
     archive = SqlDailyCloseArchive(db, clock, shipped_config().sources.exchange, 7, SilentLogger())
     return CachedPriceProvider(
-        quotes=reports,
         source=reports,
         archive=archive,
         db=db,
@@ -157,14 +156,6 @@ async def test_an_index_history_asks_only_after_the_latest_session_it_holds_and_
     assert [clock.to_trading_date(bar.ts) for bar in first] == SESSIONS
     assert [(bar.close, bar.change) for bar in second[-2:]] == [(109.0, 3.0), (110.0, 1.0)]
     assert first[0].change is None
-
-
-async def test_realtime_quotes_go_to_the_quote_provider_uncached(db: DatabaseConnector) -> None:
-    quote = session_bar(MONDAY, 512.0)
-    reports = FakeDailyHistory(realtime={"6488": quote})
-
-    assert await cache_over(reports, db, MovableClock(at(MONDAY, 10))).fetch_realtime_bars(STOCKS) == {"6488": quote}
-    assert reports.asked == []
 
 
 async def test_the_timer_asks_again_once_for_sessions_saved_without_any_change_and_a_read_never_waits_for_them(

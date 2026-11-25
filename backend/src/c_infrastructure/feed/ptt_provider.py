@@ -1,5 +1,4 @@
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import override
@@ -15,6 +14,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import ContentType, InformationSource
 from b_application.config.app_config import AppConfig
 from b_application.config.sources_config import PttSources
+from c_infrastructure.feed.web_page import fetch_page
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 type TickerPatterns = tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]
@@ -153,19 +153,6 @@ class PttProvider(ISocialMediaProvider):
         return articles
 
 
-async def fetch_page(
-    client: httpx.AsyncClient, logger: ILoggingProvider, url: str, params: Mapping[str, str] | None = None
-) -> str | None:
-    """The text of a board page, or None when the board could not be read."""
-    try:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        return response.text
-    except httpx.HTTPError as error:
-        logger.warning(f"PTT request failed: {error}")
-        return None
-
-
 def parse_listings(page: str, ptt: PttSources, clock: IMarketClock) -> list[PostListing]:
     """The posts a search page lists, in its order."""
     today = clock.today()
@@ -255,7 +242,6 @@ def to_article(
         published_at=datetime.combine(listing.posted_on, datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),
         fetched_at=clock.now(),
         engagement=push_count + boo_count + arrow_count,
-        raw_metadata={"push": push_count, "boo": boo_count, "arrow": arrow_count},
     )
 
 

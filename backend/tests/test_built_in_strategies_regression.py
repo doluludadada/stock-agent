@@ -17,11 +17,13 @@ RECORDED = Path(__file__).parent / "fixtures" / "technical" / "criteria_scores.j
 def test_built_in_strategies_score_every_stock_as_the_criteria_they_replaced() -> None:
     recorded = [json.loads(line) for line in RECORDED.read_text().splitlines()]
     strategies = {strategy.strategy_id: strategy for strategy in shipped_config().technical.built_in_strategies}
+    stocks = list(random_stocks(300, 11))
+    reports = {strategy_id: strategies[strategy_id].apply(stocks) for strategy_id in sorted(strategies)}
     scored = []
 
-    for stock in random_stocks(300, 11):
-        for strategy_id in sorted(strategies):
-            report = strategies[strategy_id].apply(stock)
+    for index, stock in enumerate(stocks):
+        for strategy_id, strategy_reports in reports.items():
+            report = strategy_reports[index]
             scored.append(
                 {
                     "stock": stock.stock_id,

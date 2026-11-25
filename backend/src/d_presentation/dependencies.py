@@ -27,7 +27,7 @@ from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
-from a_domain.ports.market.price_provider import IOhlcvProvider, IQuoteBoard
+from a_domain.ports.market.price_provider import IPriceHistoryProvider, IQuoteBoard, IRealtimeQuoteProvider
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_feed import IStockFeed
 from a_domain.ports.market.world_feed import IWorldFeed
@@ -105,13 +105,13 @@ from b_application.use_cases.process.stock_brief_context import StockBriefContex
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.technical_settings_loader import TechnicalSettingsLoader
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
+from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.run_lookup import RunLookup
@@ -145,7 +145,6 @@ from b_application.use_cases.users.first_administrator_setup import FirstAdminis
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
-from b_application.use_cases.users.password_reset import PasswordReset
 from b_application.use_cases.users.ranking_follow_choice import RankingFollowChoice
 from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
@@ -219,10 +218,10 @@ from d_presentation.web.market_valuation_cache import MarketValuationCache
 if TYPE_CHECKING:
     from shioaji import Shioaji
 
-    from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
+    from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiSession
 
 
-type RealBroker = IBrokerExecutionProvider[Any, Any]
+type RealBroker = IBrokerExecutionProvider[Any]
 """A real broker whatever its SDK's types: the wiring names none of them."""
 
 
@@ -259,12 +258,10 @@ class Runtime:
     market_clock: IMarketClock
     broker_market_data: bool
     """Whether the runtime's realtime quotes are the broker's: its Shioaji login was up when it opened."""
-    shioaji: ShioajiConnection | None
-    """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
-    shioaji_client: Shioaji | None
+    shioaji: ShioajiSession | None
     """
-    The client of the login this runtime opened on, up or not, which its SinoPac keeps and a renewal replaces
-    (connect_shioaji); None where the site makes no login.
+    The process's Shioaji connection of the site's key pair, up or not, and the client this runtime opened on, which
+    its SinoPac keeps (connect_shioaji); None where the site makes no login.
     """
     real_broker: RealBroker | None
     """SinoPac on the site's login, where the audience offers it and its account check passed (connect_shioaji); else None."""
@@ -285,7 +282,7 @@ class Runtime:
         reported the login down. Without one, Buzz, Intraday and a follow priced on realtime quotes could only refuse
         every order, so the Web API refuses to start them.
         """
-        return self.broker_market_data and self.shioaji is not None and self.shioaji.up
+        return self.broker_market_data and self.shioaji is not None and self.shioaji.connection.up
 
     @property
     def quotes_missing(self) -> bool:
@@ -294,30 +291,30 @@ class Runtime:
 
     @property
     def login_down(self) -> bool:
-        """
-        Whether the site's Shioaji login failed or went down, which the timer of the scheduled follows, or the CLI's next
-        round, makes again (RuntimeSwitch.log_in_again).
-        """
-        return self.shioaji is not None and not self.shioaji.up
+        """Whether the site's latest Shioaji login failed or went down."""
+        return self.shioaji is not None and not self.shioaji.connection.up
 
     @property
     def login_due(self) -> bool:
         """
-        Whether a renewal is to replace this runtime now (RuntimeSwitch.log_in_again), which opens a runtime on these
-        settings that logs in past this one's client: the site's latest login failed or went down; the latest login is
-        on another client than this runtime's, such as one a renewal left running when it did not open within
-        api.settings_build_timeout_seconds that succeeded after, which the runtime opened then takes up and makes none;
-        or the latest login is stale (ShioajiConnection.stale). Never within the wait after a failed login
+        Whether the site's Shioaji login is to be made again now, by a runtime on these settings that logs in past this
+        one's client (RuntimeSwitch.log_in_again). Only the Web API's follow timer and the CLI's rounds ask, never a
+        request. It is due when the latest login failed or went down; when it is on another client than this runtime's,
+        such as a renewal's that came up after api.settings_build_timeout_seconds, which the next runtime takes up and
+        makes none; or when it is stale (ShioajiConnection.stale). Never within the wait after a failed login
         (ShioajiConnection.retrying).
         """
-        connection = self.shioaji
+        if self.shioaji is None:
+            return False
 
-        if connection is None or connection.retrying(self.market_clock, self.config.shioaji):
+        connection = self.shioaji.connection
+
+        if connection.retrying(self.market_clock, self.config.shioaji):
             return False
 
         return (
             not connection.up
-            or connection.client is not self.shioaji_client
+            or connection.client is not self.shioaji.client
             or connection.stale(self.market_clock, self.config.shioaji)
         )
 
@@ -347,14 +344,10 @@ class ProcessState:
     """The pace of the requests to each exchange's site for a daily report, which every runtime's requests keep."""
     shioaji_connections: dict[ShioajiLogin, ShioajiConnection] = field(default_factory=dict)
     """
-    The Shioaji connection of each login a runtime of the process made, kept for the life of the process: every client a
-    login was made on, which of them are up, and the one request pacer of the login. Every later runtime on the same
-    login reuses it, after a switch of shioaji.server away and back too, and opens on the login that is up. A runtime
-    open makes the first login alone; after that only the renewal (RuntimeSwitch.log_in_again) logs in again, once the
-    latest login failed or went down or is stale, made before the market day's shioaji.login_renewal_time. No client is
-    logged out or collected: shioaji 1.3.1 on Python 3.14 can segfault after a logout, when Solace's thread races the
-    interpreter. The sessions end with the process, which may itself exit on a segfault from Solace's thread at
-    finalization, after the app's shutdown, so losing nothing.
+    The Shioaji connection of each login a runtime of the process made, which every later runtime on that login reuses,
+    after a switch of shioaji.server away and back too. A runtime open makes its first login, and only a renewal
+    (Runtime.login_due) any later one. No client is logged out or collected: shioaji 1.3.1 on Python 3.14 can segfault
+    after a logout, when Solace's thread races the interpreter, so the sessions end with the process.
     """
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The fresh Google authentications granted for a settings save, which a reload of the settings must not forget."""
@@ -363,7 +356,9 @@ class ProcessState:
     The monthly ranking's history and the replays made of it, which every runtime's matrix provider shares: a settings
     save, such as a switch of the ranking's formula, opens a new runtime without reading every bar again.
     """
-    settlement_locks: Mapping[ExecutionProvider, asyncio.Lock] = field(default_factory=lambda: settlement_locks())
+    settlement_locks: Mapping[ExecutionProvider, asyncio.Lock] = field(
+        default_factory=lambda: {broker: asyncio.Lock() for broker in ExecutionProvider if broker.real}
+    )
     """One settlement of each real broker's orders at a time (OrderSettlement), across every runtime of the process."""
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     """
@@ -400,8 +395,8 @@ class ProviderDependencies:
     """The adapters shared by every owner, built once per process, and the factory of one owner's adapters."""
 
     stock_provider: TaiwanStockProvider
-    price_provider: IOhlcvProvider
-    """The daily history and realtime quotes the site may use: the exchanges' history cache, else the open-data archive."""
+    price_provider: IPriceHistoryProvider
+    """The daily history the site may use: the exchanges' history cache, else the open-data archive."""
     history_cache: ICachedPriceProvider | None
     """The exchanges' history cache when price_provider is one, which the Web API's timer refreshes; None for the archive."""
     bar_matrix_provider: IDailyBarMatrixProvider
@@ -447,13 +442,8 @@ class ProviderDependencies:
     The broker login's market data, which the site's realtime quotes come from and the pages' quote board asks for the
     market indexes. None without it: no quote is served.
     """
-    shioaji: ShioajiConnection | None
-    """
-    The process's Shioaji login on the server shioaji.server names, on an audience with realtime quotes, whether it is
-    up or not: a login that failed at the start has one too. None on a public site and without the server's key pair.
-    """
-    shioaji_client: Shioaji | None
-    """The client of that login the runtime opened on, which real_broker orders on (connect_shioaji); None without one."""
+    shioaji: ShioajiSession | None
+    """The Shioaji login the runtime opened on, up or not (connect_shioaji); None on a public site and without the key pair."""
     daily_close_archive: IDailyCloseArchive
     fundamentals_provider: IFundamentalsProvider | None
     """MOPS, or None for an audience that reads no MOPS (public): its valuation is refused."""
@@ -474,7 +464,6 @@ class ProviderDependencies:
     platform_provider: IPlatformProvider | None
     settings_files: ISettingsFiles
     user_store: IUserStore
-    attempt_log: IAttemptLog
     real_broker: RealBroker | None
     """
     SinoPac, on the login connect_shioaji made, where the audience offers it and its account check passed; None
@@ -486,19 +475,15 @@ class ProviderDependencies:
     """Whom the settings files on disk let order on each broker now, which every order of every runtime and process asks."""
     owned_ports: Callable[[User | None], OwnedPorts]
     """A user, or None signed out -> the adapters that hold that user's data. The order-gate check passes fakes."""
+    process: ProcessState
+    """What every runtime of the process shares, so a retired runtime and the current one hold the same locks and grants."""
     identity_provider: IIdentityProvider | None = None
     """Google, on the client of the environment's GOOGLE_CLIENT_ID; None while the site offers no sign-in with Google."""
-    settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
-    """The process's own (ProcessState), so the runtime a settings save opens still holds the grant that confirms it."""
-    settlement_locks: Mapping[ExecutionProvider, asyncio.Lock] = field(default_factory=lambda: settlement_locks())
-    """The process's own (ProcessState), so a runtime that a reload retired still settles one order at a time with the new one."""
-    process_started: datetime = field(default_factory=lambda: datetime.now(UTC))
-    """The process's own start (ProcessState.started_at), from which AbandonedRuns tells an earlier process's runs."""
 
-
-def settlement_locks() -> dict[ExecutionProvider, asyncio.Lock]:
-    """One lock per real broker, which OrderSettlement holds while it settles that broker's orders."""
-    return {broker: asyncio.Lock() for broker in ExecutionProvider if broker.real}
+    @property
+    def realtime_quotes(self) -> IRealtimeQuoteProvider:
+        """The broker login's quotes, which price every order, else the open-data archive's refusal of every quote."""
+        return self.broker_quotes if self.broker_quotes is not None else self.daily_close_archive
 
 
 def create_ai_provider(config: AppConfig, logger: ILoggingProvider, provider: AiProvider) -> IAiProvider:
@@ -563,23 +548,16 @@ def site_login(config: AppConfig) -> ShioajiLogin | None:
 
 async def connect_shioaji(
     config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock, *, replaced: Shioaji | None = None
-) -> tuple[IBrokerQuoteProvider | None, RealBroker | None, Shioaji | None]:
+) -> tuple[IBrokerQuoteProvider | None, RealBroker | None, ShioajiSession | None]:
     """
-    The market data, the SinoPac broker and the client of a runtime on the process's Shioaji login on the server
-    shioaji.server names, which the process logs in once and every later runtime on that server reuses, stale or not.
-    Once that login fails or Shioaji reports it down or refuses its token, a runtime opens without it until the
-    renewal (RuntimeSwitch.log_in_again) logs in again on a new client (ShioajiQuoteProvider.connect); the renewal's
-    runtime passes the client it replaces, `replaced`, and logs in past it. The client is read once, after the quotes
-    connected, and both the broker and the runtime keep that one (Runtime.shioaji_client), so a run never changes client
-    and a runtime knows which login it is on. A runtime on the other server, after a switch, logs in there on a client
-    of its own. The broker exists where the audience offers it and its account check passes (on production with the CA
-    certificate the production credentials name); a run uses the broker only when an administrator chooses it.
+    The market data, the SinoPac broker and the login session of a runtime on the process's Shioaji login of the server
+    shioaji.server names, which the process logs in once and every later runtime on that server reuses. A renewal
+    (Runtime.login_due) passes the client it replaces as `replaced`, and the login is made past it on a new client. The
+    session's client is read once, after the quotes connected, and the broker orders on it for the runtime's life.
 
-    An audience without realtime quotes (public) builds no Shioaji adapter. A personal site without the key pair, or
-    whose login fails, has no realtime quote and no SinoPac, so nothing is ordered; its daily history still comes from
-    the exchanges' reports. A login without the stock account counts as failed only where it would replace a SinoPac
-    login that works (log_in). Otherwise it serves the market data, and its account check fails, so the site offers no
-    SinoPac until a login brings the account.
+    None, None, None on an audience without realtime quotes (public) and without the key pair; a login that fails gives
+    the session alone, so the runtime knows its login is down. The broker exists where the audience offers it and its
+    account check passes.
     """
     logger = process.logger
     login = site_login(config)
@@ -592,7 +570,7 @@ async def connect_shioaji(
 
     client_class = import_shioaji()
 
-    from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
+    from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider, ShioajiSession
 
     if login not in process.shioaji_connections:
         process.shioaji_connections[login] = ShioajiConnection(client=client_class(simulation=login.server.simulation))
@@ -616,33 +594,25 @@ async def connect_shioaji(
         await quotes.connect()
     except Exception as error:
         logger.warning(f"Shioaji {server} login failed: {error}. No realtime quote, so no order")
-        return None, None, connection.client
+        return None, None, ShioajiSession(connection, connection.client)
 
-    client, reused = connection.client, connection.logged_in_at == logged_in_at
+    session, reused = ShioajiSession(connection, connection.client), connection.logged_in_at == logged_in_at
     login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
     logger.info(f"{login_line} for realtime quotes")
-    return quotes, await connect_sinopac(config, connection, client, login, market_clock, logger), client
+    return quotes, await connect_sinopac(config, session, login, market_clock, logger), session
 
 
 async def connect_sinopac(
-    config: AppConfig,
-    connection: ShioajiConnection,
-    client: Shioaji,
-    login: ShioajiLogin,
-    market_clock: TaiwanMarketClock,
-    logger: ILoggingProvider,
+    config: AppConfig, session: ShioajiSession, login: ShioajiLogin, market_clock: TaiwanMarketClock, logger: ILoggingProvider
 ) -> RealBroker | None:
-    """
-    SinoPac's broker on `client`, of the login the quotes connected on, where the audience offers it and its account
-    check passes, else None.
-    """
+    """SinoPac's broker on the session the quotes connected on, where the audience offers it and its account check passes."""
     from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
     if ExecutionProvider.SHIOAJI not in config.audience.brokers:
         return None
 
     broker = ShioajiExecutionProvider(
-        connection=connection, client=client, login=login, config=config, market_clock=market_clock, logger=logger
+        connection=session.connection, client=session.client, login=login, config=config, market_clock=market_clock, logger=logger
     )
     server = login.server.label
 
@@ -719,7 +689,7 @@ def create_stock_feed(
 
 
 def create_fundamentals_provider(
-    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock, listing: TaiwanStockProvider
+    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock
 ) -> IFundamentalsProvider | None:
     """
     MOPS's income statements and monthly revenue summaries, or None for an audience that reads no MOPS, which never builds
@@ -732,7 +702,7 @@ def create_fundamentals_provider(
         db=db,
         market_clock=market_clock,
         mops=config.sources.mops,
-        listing=listing,
+        monthly_revenue=config.sources.exchange.monthly_revenue,
         logger=process.logger,
         write_lock=process.cache_writes,
         pace=SharedRequestPace(db, PacedHost.MOPS),
@@ -822,23 +792,13 @@ def create_notification_provider(config: AppConfig, logger: ILoggingProvider) ->
 
 
 def create_history_cache(
-    config: AppConfig,
-    db: DatabaseConnector,
-    process: ProcessState,
-    market_clock: TaiwanMarketClock,
-    quotes: IBrokerQuoteProvider | None,
-    archive: IDailyCloseArchive,
+    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock, archive: IDailyCloseArchive
 ) -> CachedPriceProvider | None:
-    """
-    The exchanges' daily reports, kept in the database, with the broker's realtime quotes over the Shioaji login
-    connect_shioaji made, or the archive's refusal of every quote without one; None for an open-data audience (public),
-    which reads the open-data archive instead.
-    """
+    """The exchanges' daily reports, kept in the database; None for an open-data audience (public), which reads the archive."""
     if config.audience.open_data_only:
         return None
 
     return CachedPriceProvider(
-        quotes=quotes if quotes is not None else archive,
         source=ExchangeDailyReports(
             feeds=config.sources.exchange.daily_reports,
             ex_right_feed=config.sources.exchange.ex_right_references,
@@ -866,7 +826,7 @@ async def build_provider_dependencies(
     accounts_key: SecretStr,
     quotes: IBrokerQuoteProvider | None,
     real_broker: RealBroker | None,
-    shioaji_client: Shioaji | None,
+    shioaji: ShioajiSession | None,
 ) -> ProviderDependencies:
     logger = process.logger
     stock_provider = TaiwanStockProvider(
@@ -875,8 +835,7 @@ async def build_provider_dependencies(
 
     ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
     archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
-    history_cache = create_history_cache(config, db, process, market_clock, quotes, archive)
-    login = site_login(config)
+    history_cache = create_history_cache(config, db, process, market_clock, archive)
     price_provider = archive if history_cache is None else history_cache
 
     return ProviderDependencies(
@@ -920,10 +879,9 @@ async def build_provider_dependencies(
         users_stocks=SqlUsersStocks(db, market_clock),
         users_orders=SqlUsersOrders(db),
         broker_quotes=quotes,
-        shioaji=process.shioaji_connections.get(login) if login is not None else None,
-        shioaji_client=shioaji_client,
+        shioaji=shioaji,
         daily_close_archive=archive,
-        fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock, stock_provider),
+        fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock),
         company_basics_provider=create_company_basics_provider(config, db, logger),
         annual_report_provider=create_annual_report_provider(config, db, market_clock, logger),
         news_provider=create_news_provider(config, logger, archive, market_clock),
@@ -940,16 +898,12 @@ async def build_provider_dependencies(
             project_root=config.project_root,
             max_bytes=config.api.settings_file_max_bytes,
             backups_kept=config.api.settings_backups_kept,
-            running=config,
             logger=logger,
         ),
         user_store=SqlUserStore(db, accounts_key, logger),
-        attempt_log=process.attempt_log,
         real_broker=real_broker,
         identity_provider=create_identity_provider(config),
-        settings_confirmations=process.settings_confirmations,
-        settlement_locks=process.settlement_locks,
-        process_started=process.started_at,
+        process=process,
         ordering_switch=SettingsFileOrderingSwitch(config.project_root),
         owned_ports=create_owned_ports(config, db, ai_providers, market_clock, logger, process.cache_writes),
     )
@@ -979,7 +933,7 @@ def create_owned_ports(
         return OwnedPorts(
             journal=TradingJournal(owners_db),
             watchlist_repository=WatchlistRepository(owners_db, logger, market_clock),
-            technical_settings_repository=SqlTechnicalSettingsRepository(owners_db),
+            technical_settings_repository=SqlTechnicalSettingsRepository(owners_db, config.technical.initial_settings),
             mock_broker=MockExecutionProvider(owners_db, config, market_clock, logger),
             ai_provider=counted,
             sentiment_classifier=AiSentimentClassifier(counted, sentiment_repository, config, logger),
@@ -1076,9 +1030,9 @@ def build_pipeline(
     user_id = user.user_id if user is not None else None
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
     ai_model = config.ai.offered_models[config.ai.model_for(user.ai_model if user is not None else None)]
+    attempt_log = dependencies.process.attempt_log
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
-        technical_settings_loader=TechnicalSettingsLoader(owned.technical_settings_repository, config),
         technical_settings_repository=owned.technical_settings_repository,
         run_history=RunHistory(
             journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None), chosen
@@ -1162,7 +1116,6 @@ def build_pipeline(
         world_brief=DailyStockBrief(
             dependencies.world_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.WORLD
         ),
-        world_brief_lookup=BriefLookup(dependencies.world_brief_repository, market_clock, config, BriefKind.WORLD),
         stock_brief_context=StockBriefContext(
             stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
         ),
@@ -1170,7 +1123,7 @@ def build_pipeline(
             dependencies.stock_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model
         ),
         stock_brief_lookup=BriefLookup(dependencies.stock_brief_repository, market_clock, config),
-        realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
+        realtime_quote_feed=RealtimeQuoteFeed(dependencies.realtime_quotes, market_clock, config, logger),
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
         news_feed=NewsFeed(dependencies.news_provider, config, logger),
@@ -1185,9 +1138,9 @@ def build_pipeline(
         order_execution=OrderExecution(broker, journal, users, ordering, user_id, market_clock, config, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
         order_settlement=OrderSettlement(
-            dependencies.real_broker, journal, dependencies.settlement_locks, market_clock, config, logger
+            dependencies.real_broker, journal, dependencies.process.settlement_locks, market_clock, config, logger
         ),
-        abandoned_runs=AbandonedRuns(dependencies.real_broker, journal, market_clock, dependencies.process_started, logger),
+        abandoned_runs=AbandonedRuns(dependencies.real_broker, journal, market_clock, dependencies.process.started_at, logger),
         mock_account_loader=AccountLoader(owned.mock_broker, stocks, logger),
         mock_order_preparation=OrderPreparation(journal, owned.mock_broker, users, ordering, user_id, market_clock, config, logger),
         mock_order_execution=OrderExecution(owned.mock_broker, journal, users, ordering, user_id, market_clock, config, logger),
@@ -1214,6 +1167,7 @@ def build_pipeline(
         holding_repository=owned.holding_repository,
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
+        recent_runs=RecentRuns(journal),
         run_lookup=RunLookup(journal),
         account_history=AccountHistory(broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         backtest_options=BacktestOptions(prices, config),
@@ -1236,30 +1190,28 @@ def build_pipeline(
         ),
         dispatcher=Dispatcher(dependencies.platform_provider, logger),
         settings_reader=SettingsReader(dependencies.settings_files),
-        settings_editor=SettingsEditor(dependencies.settings_files, dependencies.users_orders),
+        settings_editor=SettingsEditor(dependencies.settings_files, dependencies.users_orders, config),
         settings_confirmation=SettingsConfirmation(
-            dependencies.user_store, dependencies.attempt_log, dependencies.settings_confirmations, market_clock, config, logger
+            dependencies.user_store, attempt_log, dependencies.process.settings_confirmations, market_clock, config, logger
         ),
         settings_reauthentication=SettingsReauthentication(
-            dependencies.user_store, dependencies.settings_confirmations, market_clock, config, logger
+            dependencies.user_store, dependencies.process.settings_confirmations, market_clock, config, logger
         ),
         settings_save=SettingsSave(dependencies.settings_files, market_clock, logger),
         editor_access=EditorAccess(dependencies.user_store, config),
         sign_in_options=SignInOptions(dependencies.user_store, config),
         first_administrator_setup=FirstAdministratorSetup(dependencies.user_store, market_clock, LEGACY_OWNER_ID, logger),
-        sign_in_attempt=SignInAttempt(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
+        sign_in_attempt=SignInAttempt(dependencies.user_store, attempt_log, market_clock, config, logger),
         google_sign_in_start=GoogleSignInStart(
-            dependencies.identity_provider, dependencies.attempt_log, dependencies.user_store, market_clock, config
+            dependencies.identity_provider, attempt_log, dependencies.user_store, market_clock, config
         ),
-        google_identity_check=GoogleIdentityCheck(
-            dependencies.identity_provider, dependencies.attempt_log, market_clock, config, logger
-        ),
+        google_identity_check=GoogleIdentityCheck(dependencies.identity_provider, attempt_log, market_clock, config, logger),
         google_account=GoogleAccount(dependencies.user_store, market_clock, config, LEGACY_OWNER_ID, logger),
-        password_reset=PasswordReset(dependencies.user_store, market_clock, logger),
-        user_registration=UserRegistration(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
+        user_registration=UserRegistration(dependencies.user_store, attempt_log, market_clock, config, logger),
         session_start=SessionStart(dependencies.user_store, market_clock, config),
-        signed_in_user=SignedInUser(dependencies.user_store, market_clock),
+        signed_in_user=SignedInUser(dependencies.user_store),
         user_store=dependencies.user_store,
+        market_clock=market_clock,
         user_change=UserChange(dependencies.user_store, market_clock, logger),
         ai_model_lookup=AiModelLookup(config),
         ai_model_choice=AiModelChoice(dependencies.user_store, market_clock, config, logger),
@@ -1304,7 +1256,7 @@ def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
     stock_feed = create_stock_feed(config, logger, market_clock, dependencies)
-    quote_board = QuoteBoard(dependencies.price_provider, dependencies.broker_quotes, market_clock, config.market_data, logger)
+    quote_board = QuoteBoard(dependencies.realtime_quotes, dependencies.broker_quotes, market_clock, config.market_data, logger)
     signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK, stock_feed, quote_board)
     return Runtime(
         pipeline_for=lambda user, broker: build_pipeline(
@@ -1318,7 +1270,6 @@ def compose_runtime(
         market_clock=market_clock,
         broker_market_data=dependencies.broker_quotes is not None,
         shioaji=dependencies.shioaji,
-        shioaji_client=dependencies.shioaji_client,
         real_broker=dependencies.real_broker,
         users_orders=dependencies.users_orders,
     )
@@ -1358,12 +1309,10 @@ async def open_runtime(
         db = DatabaseConnector(config=config, logger=process.logger)
         opened.push_async_callback(db.close)
         await db.init_db()
-        quotes, real_broker, shioaji_client = (
+        quotes, real_broker, shioaji = (
             await connect_shioaji(config, process, market_clock, replaced=replaced) if broker_login else (None, None, None)
         )
-        dependencies = await build_provider_dependencies(
-            config, db, process, market_clock, accounts_key, quotes, real_broker, shioaji_client
-        )
+        dependencies = await build_provider_dependencies(config, db, process, market_clock, accounts_key, quotes, real_broker, shioaji)
         await dependencies.user_store.check_key()
         yield compose_runtime(config, process.logger, market_clock, dependencies)
 

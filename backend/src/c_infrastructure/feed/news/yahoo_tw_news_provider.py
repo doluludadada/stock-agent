@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import override
 from uuid import uuid4
@@ -12,6 +11,7 @@ from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
 from b_application.config.sources_config import NewsSources
+from c_infrastructure.feed.web_page import fetch_page
 
 
 class YahooTwNewsProvider(INewsSource):
@@ -42,18 +42,6 @@ class YahooTwNewsProvider(INewsSource):
 
         self._logger.info(f"Successfully scraped {len(articles)} articles with content for {stock_id} from Yahoo.")
         return articles
-
-
-async def fetch_page(
-    client: httpx.AsyncClient, logger: ILoggingProvider, url: str, params: Mapping[str, str | int] | None = None
-) -> str | None:
-    try:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        return response.text
-    except Exception as error:
-        logger.error(f"Unexpected error reading Yahoo News page {url}: {error}")
-        return None
 
 
 def parse_listing(stock_id: str, page: str, news: NewsSources) -> list[Article]:

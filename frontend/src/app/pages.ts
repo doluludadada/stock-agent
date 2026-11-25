@@ -32,7 +32,7 @@ const RUN_FEATURES = ['full_cycle', 'specific_stock', 'buzz', 'intraday'] as con
  */
 export const PAGES = {
   home: { path: paths.home, features: [], load: () => import('./router/routes/home').then((m) => m.HomeRoute), nav: { section: 'today', icon: Home, tab: true } },
-  ranking: { path: paths.ranking, features: ['ranking'], load: () => import('./router/routes/ranking').then((m) => m.RankingRoute), nav: { section: 'research', icon: ListOrdered, tab: true } },
+  ranking: { path: paths.ranking, features: ['ranking'], load: () => import('@/features/ranking').then((m) => m.RankingPage), nav: { section: 'research', icon: ListOrdered, tab: true } },
   overview: { path: paths.market, features: ['market_overview'], load: () => import('@/features/market-overview').then((m) => m.MarketOverviewPage), nav: { section: 'research', icon: CandlestickChart } },
   world: { path: paths.world, features: ['world'], load: () => import('@/features/world').then((m) => m.WorldPage), nav: { section: 'research', icon: Globe } },
   holdings: { path: paths.holdings, features: ['holdings'], load: () => import('./router/routes/holdings').then((m) => m.HoldingsRoute), nav: { section: 'mine', icon: Briefcase, tab: true } },
@@ -40,12 +40,12 @@ export const PAGES = {
   brokerage: {
     path: paths.brokerage,
     features: ['sinopac_account'],
-    load: () => import('./router/routes/brokerage').then((m) => m.BrokerageRoute),
+    load: () => import('@/features/account').then((m) => m.BrokerageAccountPage),
     needs: 'use_real_broker',
     nav: { section: 'mine', icon: Landmark },
   },
   settings: { path: paths.mySettings, features: [], load: () => import('./router/routes/settings').then((m) => m.MySettingsRoute), nav: { section: 'mine', icon: SlidersHorizontal, menu: true } },
-  runs: { path: paths.runs, features: RUN_FEATURES, load: () => import('./router/routes/runs').then((m) => m.RunsRoute), nav: { section: 'tools', icon: Activity } },
+  runs: { path: paths.runs, features: RUN_FEATURES, load: () => import('@/features/runs').then((m) => m.RunsPage), nav: { section: 'tools', icon: Activity } },
   account: { path: paths.account, features: ['mock_account'], load: () => import('@/features/account').then((m) => m.AccountPage), nav: { section: 'tools', icon: Wallet } },
   valuation: {
     path: paths.valuation,
@@ -54,7 +54,7 @@ export const PAGES = {
     requires: 'mops',
     nav: { section: 'tools', icon: Calculator },
   },
-  strategies: { path: paths.strategies, features: ['strategy_library'], load: () => import('./router/routes/strategies').then((m) => m.StrategyLibraryRoute), nav: { section: 'tools', icon: Layers } },
+  strategies: { path: paths.strategies, features: ['strategy_library'], load: () => import('@/features/strategies').then((m) => m.StrategyLibraryPage), nav: { section: 'tools', icon: Layers } },
   backtest: { path: paths.backtest, features: ['strategy_backtest'], load: () => import('@/features/backtest').then((m) => m.BacktestPage), nav: { section: 'tools', icon: History } },
   builder: { path: paths.newStrategy, features: ['strategy_designer'], load: () => import('./router/routes/strategies').then((m) => m.NewStrategyRoute), nav: { section: 'tools', icon: Sparkles } },
   users: { path: paths.users, features: [], load: () => import('@/features/auth').then((m) => m.UsersPage), needs: 'manage_users', nav: { section: 'admin', icon: UsersRound, menu: true } },

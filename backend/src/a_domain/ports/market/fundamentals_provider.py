@@ -21,7 +21,7 @@ class IFundamentalsProvider(Protocol):
     async def fetch_monthly_revenues(self, market: MarketType, year: int, month: int) -> list[MonthlyRevenue] | None:
         """
         The market's monthly revenue summary of one month, which MOPS serves for any past month (sources.mops), each row
-        read as the OpenAPI's summary of the latest month is (ITaiwanStockProvider.parse_monthly_revenue). It is not
+        read as the OpenAPI's summary of the latest month is (ITaiwanStockProvider.fetch_monthly_revenues). It is not
         cached here: the open-data archive keeps it. None when the request fails or the answer is no such summary.
         """
         ...

@@ -5,15 +5,16 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.article_index import IArticleIndex
 from a_domain.ports.market.article_store import IArticleStore
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.ai.stock_brief import BriefContext, written_card
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
-from a_domain.rules.trading.ranking import RankingHistory
+from a_domain.rules.trading.ranking import RankingHistory, latest_decision
 from a_domain.rules.trading.ranking_standing import RankingStandingRule
 from a_domain.types.enums import Feature
+from a_domain.types.errors import RankingUnavailable
 from b_application.config.app_config import AppConfig
 
 
@@ -35,7 +36,7 @@ class StockBriefContext:
     def __init__(
         self,
         stock_provider: ITaiwanStockProvider,
-        ohlcv_provider: IOhlcvProvider,
+        ohlcv_provider: IPriceHistoryProvider,
         store: IArticleStore,
         index: IArticleIndex,
         market_clock: IMarketClock,
@@ -68,8 +69,13 @@ class StockBriefContext:
         stock.industry = (await self._stock_provider.fetch_industries()).get(stock.stock_id, stock.industry)
         window = self._market_clock.history_window(self._history_days)
         bars = (await self._ohlcv_provider.fetch_history([stock], *window)).get(stock.stock_id, [])
-        decisions = self._decision_rule.apply(history.bars.sessions) if self._ranking_shown else []
-        standing = self._standing_rule.apply(history, *decisions[-1], [stock.stock_id])[stock.stock_id] if decisions else None
+
+        try:
+            decision = latest_decision(self._decision_rule, history.bars.sessions) if self._ranking_shown else None
+        except RankingUnavailable:
+            decision = None
+
+        standing = self._standing_rule.apply(history, *decision, [stock.stock_id])[stock.stock_id] if decision else None
         today = self._market_clock.today()
         retrieved: list[Article] = []
 

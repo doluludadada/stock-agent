@@ -99,10 +99,10 @@ describe('the two curves', () => {
 
   it('start both at zero on the first session and end at the returns the summary reports', () => {
     expect(curve.map((point) => point.date)).toEqual(['2026-05-04', '2026-05-05', '2026-05-06'])
-    expect(curve[0]).toEqual({ date: '2026-05-04', strategy: 0, benchmark: 0 })
-    expect(curve[1]!.strategy).toBeCloseTo(-0.01)
+    expect(curve[0]).toEqual({ date: '2026-05-04', value: 0, benchmark: 0 })
+    expect(curve[1]!.value).toBeCloseTo(-0.01)
     expect(curve[1]!.benchmark).toBeCloseTo(0.05)
-    expect(curve[2]!.strategy).toBeCloseTo(0.032)
+    expect(curve[2]!.value).toBeCloseTo(0.032)
     expect(curve[2]!.benchmark).toBeCloseTo(0.446)
   })
 
@@ -117,7 +117,7 @@ describe('the two curves', () => {
 
   it('draw the strategy alone when the history holds no index bars', () => {
     const alone = returnCurve({ inputs: INPUTS, equity_curve: { '2026-05-04': account(1_010_000) }, benchmark: [] })
-    expect(alone).toEqual([{ date: '2026-05-04', strategy: expect.closeTo(0.01), benchmark: null }])
+    expect(alone).toEqual([{ date: '2026-05-04', value: expect.closeTo(0.01), benchmark: null }])
   })
 })
 

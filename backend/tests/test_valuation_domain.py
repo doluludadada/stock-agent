@@ -17,7 +17,6 @@ from a_domain.rules.valuation.scan import ValuationStepRule
 from a_domain.rules.valuation.valuation import AppraisalRule, ExplanationSectionsRule, FactSectionsRule, StockValuationRule
 from a_domain.types.enums import (
     EliminationReason,
-    EpsBasis,
     EpsKind,
     EpsUnavailableReason,
     InformationSource,
@@ -65,7 +64,6 @@ def ttm(value: float) -> Eps:
         value=value,
         kind=EpsKind.TRAILING_TWELVE_MONTHS,
         period_end=FiscalQuarter(2026, 2),
-        basis=EpsBasis.ACTUAL,
         source=InformationSource.TWSE_MOPS,
         fetched_at=datetime(2026, 10, 30, 18, 6),
     )

@@ -15,7 +15,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.fundamentals.filing import FilingDeadlineRule
 from a_domain.rules.valuation.valuation import AppraisalRule, StockValuationRule
-from a_domain.types.enums import AiAnalysisFocus, EpsBasis, EpsKind, InformationSource, MarketType, Workflow
+from a_domain.types.enums import AiAnalysisFocus, EpsKind, InformationSource, MarketType, Workflow
 from a_domain.types.values import FiscalQuarter
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.valuation.valuation_explainer import ValuationExplainer
@@ -109,7 +109,6 @@ async def valuation_prompt() -> str:
         value=40.0,
         kind=EpsKind.TRAILING_TWELVE_MONTHS,
         period_end=FiscalQuarter(2026, 2),
-        basis=EpsBasis.ACTUAL,
         source=InformationSource.TWSE_MOPS,
         fetched_at=MONDAY_10_00,
     )

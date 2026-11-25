@@ -21,8 +21,13 @@ def parse_number(text: str) -> float | None:
 
 
 def parse_roc_date(text: str) -> date:
-    """'1151029' (ROC year 115) is 2026-10-29."""
-    return date(int(text[:-4]) + ROC_YEAR_OFFSET, int(text[-4:-2]), int(text[-2:]))
+    """
+    '1151029', '115/10/29' and '115/9/1' write the year in the ROC calendar: 115 is 2026. A year from 1911 on is
+    Gregorian, as TPEX's index report writes it ('2026/10/29'). Raises ValueError for any other text.
+    """
+    year, month, day = text.split("/") if "/" in text else (text[:-4], text[-4:-2], text[-2:])
+    written_year = int(year)
+    return date(written_year if written_year >= ROC_YEAR_OFFSET else written_year + ROC_YEAR_OFFSET, int(month), int(day))
 
 
 def parse_optional_roc_date(text: str) -> date | None:

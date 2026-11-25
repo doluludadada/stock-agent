@@ -2,7 +2,6 @@ import { Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'rea
 import { RegisterScreen, safeNext, SetupScreen, SignInScreen, useAuthStatus, useSessionProbe } from '@/features/auth'
 import { useSession } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { AuthLinksProvider } from '@/shared/ui/require-sign-in'
 
 /**
  * Asks the server whether the site has its administrator yet and who is signed in. A site with no account goes to
@@ -16,11 +15,7 @@ export function AuthGate() {
   const needsSetup = status.data?.needs_first_administrator === true
   if (needsSetup && location.pathname !== paths.setup) return <Navigate to={{ pathname: paths.setup, search: location.search }} replace />
   if (status.data && !needsSetup && location.pathname === paths.setup) return <Navigate to={session.status === 'signedIn' ? paths.home : paths.signIn} replace />
-  return (
-    <AuthLinksProvider value={{ signIn: paths.signInThen, register: status.data?.registration_open === false ? null : paths.register }}>
-      <Outlet />
-    </AuthLinksProvider>
-  )
+  return <Outlet />
 }
 
 export function SetupRoute() {
@@ -34,12 +29,12 @@ export function SignInRoute() {
   const session = useSession()
   const next = safeNext(params.get('next'), paths.home)
   if (session.status === 'signedIn') return <Navigate to={next} replace />
-  return <SignInScreen registerHref={paths.register} onDone={() => navigate(next, { replace: true })} />
+  return <SignInScreen onDone={() => navigate(next, { replace: true })} />
 }
 
 export function RegisterRoute() {
   const navigate = useNavigate()
   const session = useSession()
   if (session.status === 'signedIn') return <Navigate to={paths.home} replace />
-  return <RegisterScreen signInHref={paths.signIn} onDone={() => navigate(paths.home, { replace: true })} />
+  return <RegisterScreen onDone={() => navigate(paths.home, { replace: true })} />
 }

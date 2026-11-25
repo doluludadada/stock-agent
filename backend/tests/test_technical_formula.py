@@ -44,7 +44,7 @@ def strategy(*rules: Json, indicators: Json | None = None, scoring: Json | None 
 
 def holds(condition: Json, bars: list[Ohlcv], indicators: Json | None = None, realtime_price: float | None = None) -> bool:
     """Whether the condition holds at the latest bar. A condition the strategy cannot evaluate fails the test."""
-    report = strategy(rule("Probe", condition), indicators=indicators).apply(stock(bars, realtime_price))
+    [report] = strategy(rule("Probe", condition), indicators=indicators).apply([stock(bars, realtime_price)])
 
     assert report.hard_failures in ([], ["Probe"]), report.hard_failures
     return report.passed
@@ -84,17 +84,17 @@ def with_long_period(period: int) -> TechnicalStrategy:
 
 def test_a_crossing_of_two_chosen_averages_with_a_volume_multiple_holds_on_the_crossing_bar() -> None:
     assert TREND_AND_VOLUME.required_bars == 84
-    assert TREND_AND_VOLUME.apply(stock(CROSSING_DAY)) == TechnicalReport(score=50)
-    assert TREND_AND_VOLUME.apply(stock(CROSSING_DAY[-84:])) == TechnicalReport(score=50)
+    assert TREND_AND_VOLUME.apply([stock(CROSSING_DAY)]) == [TechnicalReport(score=50)]
+    assert TREND_AND_VOLUME.apply([stock(CROSSING_DAY[-84:])]) == [TechnicalReport(score=50)]
 
 
 def test_a_new_period_under_the_same_indicator_id_changes_every_rule_that_reads_it() -> None:
     longer = with_long_period(101)
 
     assert longer.required_bars == 102
-    assert longer.apply(stock(CROSSING_DAY)) == TechnicalReport(
-        score=30, hard_failures=["My trend and volume"], soft_failures=["Close above the long average"]
-    )
+    assert longer.apply([stock(CROSSING_DAY)]) == [
+        TechnicalReport(score=30, hard_failures=["My trend and volume"], soft_failures=["Close above the long average"])
+    ]
 
 
 def test_renaming_the_rules_and_the_strategy_changes_no_result() -> None:
@@ -105,11 +105,11 @@ def test_renaming_the_rules_and_the_strategy_changes_no_result() -> None:
     )
 
     assert renamed.required_bars == 84
-    assert renamed.apply(stock(CROSSING_DAY)) == TechnicalReport(score=50)
-    assert renamed.apply(stock(CROSSING_DAY[:-1])) == TechnicalReport(score=30, hard_failures=["Rule 0"], soft_failures=["Rule 1"])
-    assert TREND_AND_VOLUME.apply(stock(CROSSING_DAY[:-1])) == TechnicalReport(
-        score=30, hard_failures=["My trend and volume"], soft_failures=["Close above the long average"]
-    )
+    assert renamed.apply([stock(CROSSING_DAY)]) == [TechnicalReport(score=50)]
+    assert renamed.apply([stock(CROSSING_DAY[:-1])]) == [TechnicalReport(score=30, hard_failures=["Rule 0"], soft_failures=["Rule 1"])]
+    assert TREND_AND_VOLUME.apply([stock(CROSSING_DAY[:-1])]) == [
+        TechnicalReport(score=30, hard_failures=["My trend and volume"], soft_failures=["Close above the long average"])
+    ]
 
 
 # ------------------------- Several indicators of a kind ------------------------- #
@@ -348,7 +348,9 @@ def test_unavailable_data_fails_the_stock_naming_its_rule_and_no_other_rule_coun
         indicators=indicators,
     )
 
-    assert probe.apply(stock(bars)) == TechnicalReport(score=0, hard_failures=["Technical data unavailable: Reads unavailable data"])
+    assert probe.apply([stock(bars)]) == [
+        TechnicalReport(score=0, hard_failures=["Technical data unavailable: Reads unavailable data"])
+    ]
 
 
 UNAVAILABLE = compare(arithmetic(CLOSE, "divide", 0), "gt", 1)
@@ -365,7 +367,7 @@ UNAVAILABLE = compare(arithmetic(CLOSE, "divide", 0), "gt", 1)
     ids=["any-holding-first", "any-holding-last", "all-failing-first", "nested"],
 )
 def test_a_group_with_an_unavailable_part_is_unavailable_whatever_its_other_parts_say(condition: Json) -> None:
-    report = strategy(rule("Group", condition, "increase_score_on_pass")).apply(stock(TWELVE_AFTER_EIGHT))
+    [report] = strategy(rule("Group", condition, "increase_score_on_pass")).apply([stock(TWELVE_AFTER_EIGHT)])
 
     assert report == TechnicalReport(score=0, hard_failures=["Technical data unavailable: Group"])
 
@@ -373,16 +375,16 @@ def test_a_group_with_an_unavailable_part_is_unavailable_whatever_its_other_part
 def test_every_rule_that_reads_unavailable_data_is_named() -> None:
     probe = strategy(rule("First", UNAVAILABLE), rule("Available", YES), rule("Second", group("all", YES, UNAVAILABLE)))
 
-    assert probe.apply(stock(TWELVE_AFTER_EIGHT)) == TechnicalReport(
-        score=0, hard_failures=["Technical data unavailable: First, Second"]
-    )
+    assert probe.apply([stock(TWELVE_AFTER_EIGHT)]) == [
+        TechnicalReport(score=0, hard_failures=["Technical data unavailable: First, Second"])
+    ]
 
 
 def test_fewer_daily_bars_than_required_fail_the_stock_before_any_rule() -> None:
-    assert TREND_AND_VOLUME.apply(stock(CROSSING_DAY[-83:])) == TechnicalReport(
-        score=0, hard_failures=["Need 84 daily bars; received 83"]
-    )
-    assert TREND_AND_VOLUME.apply(stock([])) == TechnicalReport(score=0, hard_failures=["Need 84 daily bars; received 0"])
+    assert TREND_AND_VOLUME.apply([stock(CROSSING_DAY[-83:])]) == [
+        TechnicalReport(score=0, hard_failures=["Need 84 daily bars; received 83"])
+    ]
+    assert TREND_AND_VOLUME.apply([stock([])]) == [TechnicalReport(score=0, hard_failures=["Need 84 daily bars; received 0"])]
 
 
 @pytest.mark.parametrize(
@@ -470,7 +472,7 @@ SCORING = {"base_score": 60, "block_failure_penalty": 20, "failure_score_reducti
     ids=["block-failed", "block-passed", "reduce-failed", "reduce-passed", "increase-passed", "increase-failed"],
 )
 def test_a_rules_effect_applies_once_however_many_conditions_it_holds(effect: str, condition: Json, report: TechnicalReport) -> None:
-    assert strategy(rule("Rule", condition, effect), scoring=SCORING).apply(stock(TWELVE_AFTER_EIGHT)) == report
+    assert strategy(rule("Rule", condition, effect), scoring=SCORING).apply([stock(TWELVE_AFTER_EIGHT)]) == [report]
 
 
 def test_failures_and_bonuses_of_several_rules_add_up() -> None:
@@ -481,9 +483,14 @@ def test_failures_and_bonuses_of_several_rules_add_up() -> None:
         rule("Passes", THREE_HOLDING),
     )
 
-    assert strategy(*rules, scoring=SCORING).apply(stock(TWELVE_AFTER_EIGHT)) == TechnicalReport(
-        score=37, hard_failures=["Blocks"], soft_failures=["Reduces"], observations=[TechnicalObservation(rule="Adds", detected=True)]
-    )
+    assert strategy(*rules, scoring=SCORING).apply([stock(TWELVE_AFTER_EIGHT)]) == [
+        TechnicalReport(
+            score=37,
+            hard_failures=["Blocks"],
+            soft_failures=["Reduces"],
+            observations=[TechnicalObservation(rule="Adds", detected=True)],
+        )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -497,4 +504,4 @@ def test_failures_and_bonuses_of_several_rules_add_up() -> None:
 def test_the_score_stays_between_0_and_100(scoring: Json, effect: str, condition: Json, score: int) -> None:
     probe = strategy(rule("First", condition, effect), rule("Second", condition, effect), scoring=scoring)
 
-    assert probe.apply(stock(TWELVE_AFTER_EIGHT)).score == score
+    assert probe.apply([stock(TWELVE_AFTER_EIGHT)])[0].score == score

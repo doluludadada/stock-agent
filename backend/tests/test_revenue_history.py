@@ -26,11 +26,10 @@ from a_domain.rules.fundamentals.trailing_eps import QuarterEps
 from a_domain.types.enums import MarketType
 from a_domain.types.errors import ArchiveSaveRefused
 from a_domain.types.values import FiscalQuarter
-from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.use_cases.collect.fundamentals_history_backfill import FundamentalsHistoryBackfill
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
-from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
@@ -81,13 +80,6 @@ def test_december_is_filed_by_the_deadline_in_january_of_the_next_year() -> None
     assert rule.apply(date(2024, 12, 1), date(2025, 1, 31), {(TWSE, 2024, 12): date(2025, 1, 11)}) == [(TPEX, 2024, 12)]
 
 
-def listing() -> TaiwanStockProvider:
-    clock = TaiwanMarketClock(MarketHoursConfig())
-    return TaiwanStockProvider(
-        exchange=CONFIG.sources.exchange, market_clock=clock, market_data=MarketDataConfig(), logger=SilentLogger()
-    )
-
-
 @pytest.fixture
 def served_files(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """MOPS over the fixture files: the address of each one, 404 for any other; the addresses asked, in order."""
@@ -113,7 +105,7 @@ def mops() -> MopsFundamentalsProvider:
         db=cast(Any, None),
         market_clock=TaiwanMarketClock(MarketHoursConfig()),
         mops=unspaced,
-        listing=listing(),
+        monthly_revenue=CONFIG.sources.exchange.monthly_revenue,
         logger=SilentLogger(),
         write_lock=asyncio.Lock(),
         pace=RequestPace(),

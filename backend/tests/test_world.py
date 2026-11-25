@@ -40,7 +40,6 @@ from a_domain.types.errors import AiAllowanceSpentError
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import load_settings, settings_notices
 from b_application.config.sources_config import WorldIndicatorFeed, WorldNewsFeed, WorldSources
-from b_application.schemas.collect import WorldUpdate
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.stock_brief_dto import WorldBriefDTO
 from c_infrastructure.database.repositories.article_store import SqlArticleStore
@@ -443,12 +442,11 @@ async def test_a_round_keeps_the_feeds_items_and_readings_and_a_second_round_add
     harness, _ = world_site()
     pipeline = harness.runtime.signed_out
 
-    first = await pipeline.refresh_world()
-    second = await pipeline.refresh_world()
+    await pipeline.refresh_world()
+    await pipeline.refresh_world()
     world = await pipeline.load_world()
     readings, held = world.readings, world.news
 
-    assert (first, second) == (WorldUpdate(kept=2, embedded=2, readings=4), WorldUpdate(kept=0, embedded=0, readings=0))
     assert [(article.title, article.source, article.content) for article in held] == [
         (EXPORT_CONTROLS.title, InformationSource.CNA, EXPORT_CONTROLS.content),
         (FED_CUT.title, InformationSource.BBC, FED_CUT.content),
@@ -482,11 +480,12 @@ async def test_the_index_failing_keeps_the_items_and_the_next_round_embeds_them(
     harness, _ = world_site()
     harness.embedder.failure = RuntimeError("the model file is missing")
 
-    first = await harness.runtime.signed_out.refresh_world()
+    await harness.runtime.signed_out.refresh_world()
+    first = (len(await harness.articles.latest(WORLD, 10)), len(harness.embedder.embedded))
     harness.embedder.failure = None
-    again = await harness.runtime.signed_out.refresh_world()
+    await harness.runtime.signed_out.refresh_world()
 
-    assert (first.kept, first.embedded) == (2, 0) and (again.kept, again.embedded) == (0, 2)
+    assert first == (2, 0) and len(harness.embedder.embedded) == 2
 
 
 # ------------------------------------------------ the day's brief ------------------------------------------------ #

@@ -1,9 +1,9 @@
 import { ArrowRight, FlaskConical, Landmark, TriangleAlert } from 'lucide-react'
-import { useState, type ComponentType, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { useHasPermission, useShows, type PageRefusal, type SaveConfirmationProps, type Schemas } from '@/shared/api'
+import { useHasPermission, useShows, type PageRefusal, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -12,6 +12,7 @@ import { Button } from '@/shared/ui/button'
 import { Field } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 import { Panel } from '@/shared/ui/panel'
+import { SaveConfirmation } from '@/shared/ui/save-confirmation'
 import type { BrokerageAccount } from './api'
 import { loginState } from './model'
 
@@ -25,7 +26,7 @@ type Action = 'server' | 'ordering' | 'cash'
  * settings it is also where SinoPac is managed: the server, ordering on it, and the simulation account's starting cash,
  * each a settings save behind the administrator's password. The server decides every rule of a switch.
  */
-export function SinoPacPanel({ account, Confirmation }: { account: BrokerageAccount; Confirmation: ComponentType<SaveConfirmationProps> }) {
+export function SinoPacPanel({ account }: { account: BrokerageAccount }) {
   const { t } = useTranslation('account')
   const format = useFormat()
   const analysed = useShows('holdings')
@@ -61,13 +62,13 @@ export function SinoPacPanel({ account, Confirmation }: { account: BrokerageAcco
             )}
           </p>
         )}
-        {manages && <Manage account={account} Confirmation={Confirmation} />}
+        {manages && <Manage account={account} />}
       </div>
     </Panel>
   )
 }
 
-function Manage({ account, Confirmation }: { account: BrokerageAccount; Confirmation: ComponentType<SaveConfirmationProps> }) {
+function Manage({ account }: { account: BrokerageAccount }) {
   const { t } = useTranslation('account')
   const format = useFormat()
   const [action, setAction] = useState<Action | null>(null)
@@ -133,9 +134,9 @@ function Manage({ account, Confirmation }: { account: BrokerageAccount; Confirma
           </span>
         </p>
       )}
-      {action === 'server' && <ServerSwitch target={target} Confirmation={Confirmation} onClose={() => setAction(null)} onRefused={refuse} />}
-      {action === 'ordering' && <OrderingSwitch account={account} Confirmation={Confirmation} onClose={() => setAction(null)} onRefused={refuse} />}
-      {action === 'cash' && cash !== null && <CashChange cash={cash} Confirmation={Confirmation} onClose={() => setAction(null)} onRefused={refuse} />}
+      {action === 'server' && <ServerSwitch target={target} onClose={() => setAction(null)} onRefused={refuse} />}
+      {action === 'ordering' && <OrderingSwitch account={account} onClose={() => setAction(null)} onRefused={refuse} />}
+      {action === 'cash' && cash !== null && <CashChange cash={cash} onClose={() => setAction(null)} onRefused={refuse} />}
     </div>
   )
 }
@@ -155,13 +156,12 @@ function Row({ label, value, note, children }: { label: string; value: string; n
 }
 
 interface SaveProps {
-  Confirmation: ComponentType<SaveConfirmationProps>
   onClose: () => void
   onRefused: (refusal: PageRefusal) => void
 }
 
 /** The server's switch: what changes, and on the way to production the server's name typed out, then the password. */
-function ServerSwitch({ target, Confirmation, onClose, onRefused }: SaveProps & { target: Server }) {
+function ServerSwitch({ target, onClose, onRefused }: SaveProps & { target: Server }) {
   const { t } = useTranslation('account')
   const [typed, setTyped] = useState('')
   const phrase = t('brokerage.server.production')
@@ -171,7 +171,7 @@ function ServerSwitch({ target, Confirmation, onClose, onRefused }: SaveProps & 
   ]
   const consequences = target === 'production' ? (['realMoney', 'orderingOff', 'login', 'follows'] as const) : (['noRealMoney', 'orderingOff', 'login'] as const)
   return (
-    <Confirmation
+    <SaveConfirmation
       open
       onOpenChange={(open) => !open && onClose()}
       changes={changes}
@@ -195,16 +195,16 @@ function ServerSwitch({ target, Confirmation, onClose, onRefused }: SaveProps & 
           <Input value={typed} onChange={(event) => setTyped(event.target.value)} autoComplete="off" />
         </Field>
       )}
-    </Confirmation>
+    </SaveConfirmation>
   )
 }
 
 /** Ordering on SinoPac between off and administrators, the same save and the same confirmation. */
-function OrderingSwitch({ account, Confirmation, onClose, onRefused }: SaveProps & { account: BrokerageAccount }) {
+function OrderingSwitch({ account, onClose, onRefused }: SaveProps & { account: BrokerageAccount }) {
   const { t } = useTranslation('account')
   const next = account.ordering ? 'off' : 'on'
   return (
-    <Confirmation
+    <SaveConfirmation
       open
       onOpenChange={(open) => !open && onClose()}
       changes={[{ path: 'features.sinopac_ordering', value: account.ordering ? 'off' : 'administrators' }]}
@@ -218,19 +218,19 @@ function OrderingSwitch({ account, Confirmation, onClose, onRefused }: SaveProps
       onRefused={onRefused}
     >
       {next === 'on' && account.server === 'production' && <p className="text-sm font-medium text-destructive">{t('brokerage.manage.ordering.realMoney')}</p>}
-    </Confirmation>
+    </SaveConfirmation>
   )
 }
 
 /** The simulation account's starting cash: what the owner has put in, so adding money is raising it. */
-function CashChange({ cash, Confirmation, onClose, onRefused }: SaveProps & { cash: number }) {
+function CashChange({ cash, onClose, onRefused }: SaveProps & { cash: number }) {
   const { t } = useTranslation('account')
   const format = useFormat()
   const [typed, setTyped] = useState(String(cash))
   const amount = Number(typed)
   const valid = typed.trim() !== '' && Number.isFinite(amount) && amount > 0
   return (
-    <Confirmation
+    <SaveConfirmation
       open
       onOpenChange={(open) => !open && onClose()}
       changes={valid ? [{ path: 'shioaji.simulation_initial_cash', value: amount }] : []}
@@ -247,7 +247,7 @@ function CashChange({ cash, Confirmation, onClose, onRefused }: SaveProps & { ca
       <Field label={t('brokerage.manage.cash.field')} error={typed.trim() !== '' && !valid ? t('brokerage.manage.cash.invalid') : null}>
         <Input value={typed} onChange={(event) => setTyped(event.target.value)} inputMode="numeric" autoComplete="off" />
       </Field>
-    </Confirmation>
+    </SaveConfirmation>
   )
 }
 

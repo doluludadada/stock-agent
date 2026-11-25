@@ -66,7 +66,8 @@ src/
   account and ranking features, and My holdings receives the `watched` stocks from the watchlist feature. The home page
   (`app/router/routes/home.tsx`) is composed the same way: each feature exports its own card (`WorldToday`, `MarketToday`,
   `RankingToday`, `HoldingsToday`, `WatchlistToday`), and the route lays them out. URL builders are shared config
-  (`shared/config/paths.ts`): features link with them, and routes pass no hrefs.
+  (`shared/config/paths.ts`): features link with them, and routes pass no hrefs. The sign-in and register links, back to
+  the page, are `useAuthLinks` (`shared/ui/require-sign-in.tsx`).
 - Code outside a feature uses only its `index.ts`.
 - `shared` and `i18n` never import `app` or a feature.
 - `tools/check-boundaries.ts` enforces these rules for alias and relative imports. It also
@@ -133,7 +134,8 @@ the contract by `catalog.test.ts`.
 | The SinoPac account as the broker reports it: which server, why a switch to the other one would be refused (`switch_refusal`, with the names of the variables still unset), whether the login is up or down, whether the site may order there, the simulation's starting cash, and the statement | `account/api.ts` | `/v1/account/brokerage` |
 | The user's holdings as one portfolio, from the sources chosen; a hand-entered holding kept or removed | `holdings/api.ts` | `/v1/holdings`, `/v1/holdings/manual`, `/v1/holdings/manual/remove` |
 | The reset of the mock account with a new starting capital | `account/api.ts` | `/v1/account/reset` |
-| The settings form: every setting with its kind, bounds, choices and value; a save of the changed ones | `admin-settings/api.ts` | `/v1/admin/settings` |
+| The settings form: every setting with its kind, bounds, choices and value | `admin-settings/api.ts` | `/v1/admin/settings` |
+| A save of the changed settings, from the settings page or the SinoPac account page; a confirmation by Google waiting in the tab | `shared/api/settings-save.ts`, `shared/api/google-confirmation.ts` | `PUT /v1/admin/settings` |
 | Who is signed in, setup, sign-in, registration, sign-out | `auth/api.ts` | `/v1/auth` |
 | The AI models the site offers the user, and the user's choice | `auth/api.ts` | `/v1/auth/me/ai-model` |
 | The users directory and changes to a user | `auth/api.ts` | `/v1/admin/users` |
@@ -285,7 +287,7 @@ when it is back in focus a minute later, and at once when a request is refused w
 The theme, the locale and the folded navigation sections the reader opened stay in `localStorage`
 (`stock-agent.theme`, `stock-agent.locale`, `stock-agent.nav.opened`); each works for the visit when storage is
 refused. The settings form and the formula designer keep their unsaved changes in the page only and ask before the
-page is left with one. When the session ends under them (a 401, a sign-out in another tab), the sign-in prompt
+page is left with one (`useLeaveGuard`, `shared/lib/leave-guard.ts`). When the session ends under them (a 401, a sign-out in another tab), the sign-in prompt
 replaces the page, so `useKeptDraft` (`shared/lib/kept-draft.ts`) keeps the draft in memory and hands it back when the
 same user opens the page again; another user never gets it. The settings files hold no
 secret: the server refuses one written into them, and its form shows none.
@@ -379,7 +381,7 @@ secret: the server refuses one written into them, and its form shows none.
   administrator opens it or jumps to it, a search finds a setting in it or a problem sits in it.
 - A setting another page manages behind its own confirmation shows in the form as text with a link to that page
   (`MANAGED_ELSEWHERE` in `form.ts`): `shioaji.server`, which the SinoPac account page switches.
-  Every page saves through the one confirmation, `SaveConfirmation` (the password, or a fresh Google sign-in that
+  Every page saves through the one confirmation, `SaveConfirmation` (`shared/ui/save-confirmation.tsx`: the password, or a fresh Google sign-in that
   comes back to the settings page, which sends the save and then goes back to the page it was made on).
 - A setting that changes only at a restart (`environment`, `audience`) shows as text with one line why. JSON that does
   not parse is held at its field in the words of the server's refusal codes (`admin:refusal.<code>`), and a save the
@@ -491,8 +493,7 @@ The mock account page (`/account`) is the mock account alone. The SinoPac accoun
   shows. It says once that every figure is the broker's own, with the time read.
 - For an administrator who edits the settings the same card manages SinoPac: the server, ordering on it (off or
   administrators) and, on the simulation server, the starting cash, which is all the money put in. Each is a save of
-  the settings files through the settings feature's `SaveConfirmation`, which the route hands in
-  (`app/router/routes/brokerage.tsx`). A switch of the server lists what changes, sends the server and ordering off
+  the settings files through `SaveConfirmation`, the settings page's own confirmation. A switch of the server lists what changes, sends the server and ordering off
   in one save, and on the way to production asks for 「正式環境」 typed out. While the server refuses the switch
   (`switch_refusal`, ServerSwitchRule's) the switch stays off and the card says why, with the target server's unset
   variables by name, never a value. The server decides every rule of a switch; the card only says them. A start of a
@@ -545,7 +546,7 @@ third party's item, the stock page's news too.
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `quote-time`, `state-block`, `page-header`,
 `ranking-score`, `formula-line`, `stock-name`, `error-state`, `ai-byline`, `news-row`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
-`stock-picker`, `confirm-dialog`, `stock-ids-problem`, `orders-table`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
+`stock-picker`, `confirm-dialog`, `stock-ids-problem`, `orders-table`, `save-confirmation`, `password-dialog`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 
 ## Internationalization
 
@@ -557,7 +558,7 @@ source exists, and that dynamic key families resolve. Dates and numbers use `Int
 
 The built-in strategies' rule names are text, not keys, because they hold `.` and `:`.
 `locales/zh-TW/rule-names.ts` maps each English name to its Chinese name. A rule's name is the owner's text and shows
-as typed, with one exception: `useStrategyLabels().rule(strategyId, name)` reads a rule of a strategy with a built-in id
+as typed, with one exception: `useStrategyLabels().rule(strategyId, name)` (`shared/lib/strategy-labels.ts`) reads a rule of a strategy with a built-in id
 in the reader's language while its name is one the built-ins ship. It keys on the strategy, never on the name alone, so
 a name the owner typed in their own strategy stays as typed even when a built-in rule has it; the run page reads the
 run's strategy from `summary.technical_strategy_id`. The formula designer always shows the names as its fields hold
