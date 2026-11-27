@@ -42,9 +42,9 @@ SETUP = (
 
 class TestDatabase:
     """
-    The session's database, whether a test has opened it since it was last emptied, and `superuser`, the role that may
-    create pgvector's extension: the test role where it is a superuser, as on CI, else the user running the tests, who
-    is the superuser of a Homebrew server.
+    The session's database, whether a test has opened it since it was last emptied, and `superuser`, the role that
+    creates pgvector's extension and drops the database: the test role where it is a superuser, as on CI, else the user
+    running the tests, who is the superuser of a Homebrew server.
     """
 
     __test__ = False
@@ -111,16 +111,15 @@ class TestDatabase:
         asyncio.run(self.drop_database())
 
     async def drop_database(self) -> None:
-        server = await asyncpg.connect(database="postgres", **SERVER)
-
-        try:
-            await server.execute(f'DROP DATABASE IF EXISTS "{self.name}" WITH (FORCE)')
-        finally:
-            await server.close()
+        """
+        As `superuser`: the drop ends every backend in the database, and an autovacuum worker at work there is one the
+        test role may not end, so PostgreSQL would refuse the test role's drop.
+        """
+        await as_superuser(self.superuser, "postgres", f'DROP DATABASE IF EXISTS "{self.name}" WITH (FORCE)')
 
 
 async def as_superuser(superuser: str, database: str, statement: str) -> None:
-    """Runs `statement` on `database` alone as `superuser` (TestDatabase.superuser), as creating pgvector's extension needs."""
+    """Runs `statement` on `database` alone as `superuser` (TestDatabase.superuser): pgvector's extension and the session's drop."""
     password = SERVER["password"] if superuser == TEST_ROLE else None
     connection = await asyncpg.connect(host=SERVER["host"], port=SERVER["port"], user=superuser, password=password, database=database)
 
